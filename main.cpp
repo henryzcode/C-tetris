@@ -1,10 +1,7 @@
-#include "entities.h" 
-
 #include <SDL2/SDL.h>
 #include <SDL_mixer.h>
 #include <SDL_image.h>
 #include <SDL_ttf.h>
-
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
@@ -14,6 +11,8 @@
 #include <map>
 #include <utility>
 
+#include "entities.h"
+
 namespace fs = std::filesystem;
 
 using KickTable = std::map<std::pair<int, int>, std::vector<SDL_Point>>;
@@ -21,31 +20,89 @@ using KickList = std::map<char, KickTable>;
 
 const int fps = 60;
 
-void draw_grid(SDL_Renderer* ren, const int g_size, const int w, const int h, const int grid_x, const int grid_y);
-std::vector<std::string> load_music();
-std::map<char, SDL_Texture*> load_textures(SDL_Renderer* ren);
-void draw_matrix(SDL_Renderer* ren, const Tetro& block, int tetro_x, int tetro_y, int ghost_y, int start_x, int start_y, int g_size, char color_key, const std::map<char, SDL_Texture*>& textures);
-char rand_choice(const std::vector<char>& vec);
-bool collide(const Tetro& block, int off_x, int off_y, int play_grid_x, int play_grid_y, const std::vector<std::vector<char>>& board);
-void clear_line(std::vector<std::vector<char>>& board, int play_x, int play_y);
+bool reset_event = false;
 
-const std::string BASE_MUSIC_DIR = "assets/music/";
+class UI {
+private:
+    SDL_Texture* btn_tex = nullptr;
+    SDL_Texture* btn_hover_tex = nullptr;
+    Mix_Chunk* click_snd = nullptr;
+    std::vector<Mix_Chunk*> hover_snds;
+    bool is_hovering = false;
 
-std::random_device rd;
-std::mt19937 g(rd());
+    int btn_w = 124; 
+    int btn_h = 66;
 
-int fall_delay = 90;
-int level = 500 / fall_delay;
+public:
+    UI(SDL_Renderer* ren) {
+        btn_tex = IMG_LoadTexture(ren, "assets/button.png");
+        btn_hover_tex = IMG_LoadTexture(ren, "assets/clicked.png");
+        click_snd = Mix_LoadWAV("assets/sound/clicked.wav");
+        
+        for (int i = 0; i < 4; ++i) {
+            std::string path = "assets/sound/" + std::to_string(i) + ".wav";
+            Mix_Chunk* chunk = Mix_LoadWAV(path.c_str());
+            if (chunk) hover_snds.push_back(chunk);
+        }
+    }
+    void set_button_size(int w, int h) {
+        btn_w = w;
+        btn_h = h;
+    }
 
-int lines_cleared_total = 0;
-int score = 0;
+    void handle_event(const SDL_Event& e, bool& paused, int w, int h, bool& event) {
+        if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE) {
+            paused = !paused;
+            is_hovering = false;
+        }
 
-const int DAS = 120;
-const int ARR = 20;
-const int SDF = 10;
+        if (paused) {
+            int btn_x = w / 2 - btn_w / 2;
+            int btn_y = h / 2 - btn_h / 2;
+            
+            if (e.type == SDL_MOUSEMOTION) {
+                int mx = e.motion.x;
+                int my = e.motion.y;
+                bool in_bounds = (mx >= btn_x && mx <= btn_x + btn_w && my >= btn_y && my <= btn_y + btn_h);
+                
+                if (in_bounds && !is_hovering) {
+                    is_hovering = true;
+                    if (!hover_snds.empty()) {
+                        static std::mt19937 ui_gen(std::random_device{}());
+                        std::uniform_int_distribution<size_t> dist(0, hover_snds.size() - 1);
+                        Mix_PlayChannel(-1, hover_snds[dist(ui_gen)], 0);
+                    }
+                } else if (!in_bounds && is_hovering) {
+                    is_hovering = false;
+                }
+            }
+            
+            if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
+                if (is_hovering) {
+                    if (click_snd) Mix_PlayChannel(-1, click_snd, 0);
+                    paused = false;
+                    is_hovering = false;
+                    event = true;
+                }
+            }
+        }
+    }
 
-const Uint8 GHOST_ALPHA = 70;
-const SDL_Color FONT_COLOR = {255, 255, 255, 255};
+    void render(SDL_Renderer* ren, int w, int h) {
+        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(ren, 0, 0, 0, 180);
+        SDL_Rect screen_rect = {0, 0, w, h};
+        SDL_RenderFillRect(ren, &screen_rect);
+
+        SDL_Rect btn_rect = {w / 2 - btn_w / 2, h / 2 - btn_h / 2, btn_w, btn_h};
+        
+        if (is_hovering && btn_hover_tex) {
+            SDL_RenderCopy(ren, btn_hover_tex, NULL, &btn_rect);
+        } else if (btn_tex) {
+            SDL_RenderCopy(ren, btn_tex, NULL, &btn_rect);
+        }
+    }
+};
 
 class TextCache {
 private:
@@ -71,10 +128,8 @@ public:
                 SDL_DestroyTexture(texture);
                 texture = nullptr;
             }
-            
             current_text = new_text;
             SDL_Surface* surface = TTF_RenderText_Solid(font, current_text.c_str(), color);
-            
             if (surface) {
                 width = surface->w;
                 height = surface->h;
@@ -82,7 +137,6 @@ public:
                 SDL_FreeSurface(surface);
             }
         }
-
         if (texture) {
             SDL_Rect dest = { x, y, width, height };
             SDL_RenderCopy(ren, texture, NULL, &dest);
@@ -117,6 +171,33 @@ const KickList wall_kicks = {
     {'T', jlstz_kicks}, {'Z', jlstz_kicks}, {'I', i_kicks}, {'O', {}}
 };
 
+void draw_grid(SDL_Renderer* ren, const int g_size, const int w, const int h, const int grid_x, const int grid_y);
+std::vector<std::string> load_music();
+std::map<char, SDL_Texture*> load_textures(SDL_Renderer* ren);
+void draw_matrix(SDL_Renderer* ren, const Tetro& block, int tetro_x, int tetro_y, int ghost_y, int start_x, int start_y, int g_size, char color_key, const std::map<char, SDL_Texture*>& textures);
+char rand_choice(const std::vector<char>& vec);
+bool collide(const Tetro& block, int off_x, int off_y, int play_grid_x, int play_grid_y, const std::vector<std::vector<char>>& board);
+void clear_line(std::vector<std::vector<char>>& board, int play_x, int play_y);
+
+const std::string BASE_MUSIC_DIR = "assets/music/";
+
+std::random_device rd;
+std::mt19937 g(rd());
+
+int fall_delay = 75;
+int level = 500 / fall_delay;
+int lines_cleared_total = 0;
+int score = 0;
+
+const int DAS = 120;
+const int ARR = 20;
+const int SDF = 10;
+
+const Uint8 GHOST_ALPHA = 70;
+const SDL_Color FONT_COLOR = {255, 255, 255, 255};
+
+int last_clear = 0;
+
 std::vector<bool> active_dir = {false, false};
 std::vector<bool> das_triggered = {false, false};
 std::vector<Uint64> last_move_time = {0, 0};
@@ -142,31 +223,13 @@ int get_ghost_y(const Tetro& block, int play_grid_x, int play_grid_y, const std:
 }
 
 int main(int argc, char* argv[]) {
-
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
-        std::cerr << "SDL Init Error: " << SDL_GetError() << std::endl;
-        return 1;
-    }
-
-    if (TTF_Init() != 0) {
-        std::cerr << "TTF Init error" << std::endl;
-        return 1;
-    }
-
-    if (!(IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG)) {
-        std::cerr << "png format init error" << std::endl;
-        return 1;
-    }
-
-    if (Mix_OpenAudio(48000, AUDIO_F32SYS, 2, 4096) < 0){
-        std::cerr << "SDL mix open audio failed" << SDL_GetError() << std::endl;
-        return 1;
-    }
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) return 1;
+    if (TTF_Init() != 0) return 1;
+    if (!(IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG)) return 1;
+    if (Mix_OpenAudio(48000, AUDIO_F32SYS, 2, 4096) < 0) return 1;
 
     int mixer_flag = MIX_INIT_MP3;
-    if ((Mix_Init(mixer_flag) & mixer_flag) != mixer_flag) {
-        std::cerr << "Mixer failed to load MP3 support: " << Mix_GetError() << "\n";
-    }
+    if ((Mix_Init(mixer_flag) & mixer_flag) != mixer_flag) {}
 
     std::vector<std::string> playlist = load_music();
     Mix_Music* current_music = nullptr;
@@ -211,6 +274,8 @@ int main(int argc, char* argv[]) {
 
     SDL_Renderer* ren = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
 
+    UI ui_menu(ren);
+    bool is_paused = false;
     bool running = true;
     SDL_Event event;
 
@@ -235,67 +300,85 @@ int main(int argc, char* argv[]) {
         Uint64 cur_time = SDL_GetTicks64();
         int current_fall_del = fall_delay;
 
-        const Uint8 *state = SDL_GetKeyboardState(NULL);
+        if (!is_paused) {
+            const Uint8 *state = SDL_GetKeyboardState(NULL);
 
-        if (state[SDL_SCANCODE_DOWN]){
-            current_fall_del = std::max(1, fall_delay / SDF);
-        }
+            if (state[SDL_SCANCODE_DOWN]){
+                current_fall_del = std::max(1, fall_delay / SDF);
+            }
 
-        std::vector<bool> input_state = {
-            (bool) state[SDL_SCANCODE_LEFT],
-            (bool) state[SDL_SCANCODE_RIGHT],
-        };
+            std::vector<bool> input_state = {
+                (bool) state[SDL_SCANCODE_LEFT],
+                (bool) state[SDL_SCANCODE_RIGHT],
+            };
 
-        for (int dir: directions){
-            if (input_state[dir]){
-                if (!active_dir[dir]){
-                    active_dir[dir] = true;
-                    das_triggered[dir] = false;
-                    last_move_time[dir] = cur_time;
-
-                    switch (dir){
-                        case LEFT:
-                            if (!collide(cur_tile, -1, 0, PLAY_GRID_X, PLAY_GRID_Y, board)) { cur_tile.x -= 1; }
-                            break;
-                        case RIGHT:
-                            if (!collide(cur_tile, 1, 0, PLAY_GRID_X, PLAY_GRID_Y, board)) { cur_tile.x += 1; }
-                            break;
-                    }
-                }
-                else {
-                    Uint64 time_held = cur_time - last_move_time[dir];
-                    if ((!das_triggered[dir]) && time_held >= DAS){
-                        das_triggered[dir] = true;
+            for (int dir: directions){
+                if (input_state[dir]){
+                    if (!active_dir[dir]){
+                        active_dir[dir] = true;
+                        das_triggered[dir] = false;
                         last_move_time[dir] = cur_time;
-                        time_held = 0;
-                    }
 
-                    if (das_triggered[dir]){
-                        int moves_to_make = (ARR == 0) ? PLAY_GRID_X : time_held / ARR;
-                    
-                        if (moves_to_make > 0){
-                            for (int _ = 0; _ < moves_to_make; _++){
-                                if (dir == LEFT){
-                                    if (!collide(cur_tile, -1, 0, PLAY_GRID_X, PLAY_GRID_Y, board)) { cur_tile.x -= 1; }
-                                    else { break; }
-                                }
-                                if (dir == RIGHT){
-                                    if (!collide(cur_tile, 1, 0, PLAY_GRID_X, PLAY_GRID_Y, board)) { cur_tile.x += 1; }
-                                    else { break; }
-                                }
-                            }
-                            if (ARR > 0) last_move_time[dir] += moves_to_make * ARR;
+                        switch (dir){
+                            case LEFT:
+                                if (!collide(cur_tile, -1, 0, PLAY_GRID_X, PLAY_GRID_Y, board)) { cur_tile.x -= 1; }
+                                break;
+                            case RIGHT:
+                                if (!collide(cur_tile, 1, 0, PLAY_GRID_X, PLAY_GRID_Y, board)) { cur_tile.x += 1; }
+                                break;
                         }
                     }
+                    else {
+                        Uint64 time_held = cur_time - last_move_time[dir];
+                        if ((!das_triggered[dir]) && time_held >= DAS){
+                            das_triggered[dir] = true;
+                            last_move_time[dir] = cur_time;
+                            time_held = 0;
+                        }
+
+                        if (das_triggered[dir]){
+                            int moves_to_make = (ARR == 0) ? PLAY_GRID_X : time_held / ARR;
+                        
+                            if (moves_to_make > 0){
+                                for (int _ = 0; _ < moves_to_make; _++){
+                                    if (dir == LEFT){
+                                        if (!collide(cur_tile, -1, 0, PLAY_GRID_X, PLAY_GRID_Y, board)) { cur_tile.x -= 1; }
+                                        else { break; }
+                                    }
+                                    if (dir == RIGHT){
+                                        if (!collide(cur_tile, 1, 0, PLAY_GRID_X, PLAY_GRID_Y, board)) { cur_tile.x += 1; }
+                                        else { break; }
+                                    }
+                                }
+                                if (ARR > 0) last_move_time[dir] += moves_to_make * ARR;
+                            }
+                        }
+                    }
+                } else {
+                    active_dir[dir] = false;
+                    das_triggered[dir] = false;
                 }
-            } else {
+            }
+        } else {
+            for (int dir: directions) {
                 active_dir[dir] = false;
                 das_triggered[dir] = false;
             }
         }
 
         while (SDL_PollEvent(&event)) {
+            ui_menu.handle_event(event, is_paused, W, H, reset_event);
+
             if (event.type == SDL_QUIT) running = false;
+
+            if (reset_event){
+                board.assign(PLAY_GRID_Y, std::vector<char>(PLAY_GRID_X, 0));
+                score = 0;
+                lines_cleared_total = 0;
+                cur_tile.setup(PLAY_GRID_X);
+                cur_color = rand_choice(colors);
+                reset_event = false;
+            }
 
             if (event.type == MUSIC_END && !playlist.empty()){
                 if (current_music) Mix_FreeMusic(current_music);
@@ -307,48 +390,83 @@ int main(int argc, char* argv[]) {
                 if (current_music) Mix_FadeInMusic(current_music, 0, 10000);
             }
 
-            if (event.type == SDL_KEYUP) {
-                if (event.key.keysym.sym == SDLK_SPACE) space_hold = false;
-                if (event.key.keysym.sym == SDLK_UP) up_hold = false;
-            }
+            if (!is_paused) {
+                if (event.type == SDL_KEYUP) {
+                    if (event.key.keysym.sym == SDLK_SPACE) space_hold = false;
+                    if (event.key.keysym.sym == SDLK_UP) up_hold = false;
+                }
 
-            if (event.type == SDL_KEYDOWN) {
-                auto key = event.key.keysym.sym;
-                if (key == SDLK_ESCAPE) running = false;
-                
-                if (key == SDLK_UP && (!up_hold)){
-                    up_hold = true;
-                    int current_rot = cur_tile.get_rotation();
-                    cur_tile.rotate(1);
-                    int next_rot = cur_tile.get_rotation();
+                if (event.type == SDL_KEYDOWN) {
+                    auto key = event.key.keysym.sym;
 
-                    if (collide(cur_tile, 0, 0, PLAY_GRID_X, PLAY_GRID_Y, board)) {
-                        bool kicked = false;
-                        auto piece_it = wall_kicks.find(cur_tile.type);
-                        if (piece_it != wall_kicks.end()) {
-                            auto transition = std::make_pair(current_rot, next_rot);
-                            auto kick_it = piece_it->second.find(transition);
-                            
-                            if (kick_it != piece_it->second.end()) {
-                                for (const auto& kick : kick_it->second) {
-                                    if (!collide(cur_tile, kick.x, -kick.y, PLAY_GRID_X, PLAY_GRID_Y, board)) {
-                                        cur_tile.x += kick.x;
-                                        cur_tile.y -= kick.y;
-                                        kicked = true;
-                                        break;
+                    if (key == SDLK_DELETE){
+                        running = false;
+                    }
+                    
+                    if (key == SDLK_UP && (!up_hold)){
+                        up_hold = true;
+                        int current_rot = cur_tile.get_rotation();
+                        cur_tile.rotate(1);
+                        int next_rot = cur_tile.get_rotation();
+
+                        if (collide(cur_tile, 0, 0, PLAY_GRID_X, PLAY_GRID_Y, board)) {
+                            bool kicked = false;
+                            auto piece_it = wall_kicks.find(cur_tile.type);
+                            if (piece_it != wall_kicks.end()) {
+                                auto transition = std::make_pair(current_rot, next_rot);
+                                auto kick_it = piece_it->second.find(transition);
+                                
+                                if (kick_it != piece_it->second.end()) {
+                                    for (const auto& kick : kick_it->second) {
+                                        if (!collide(cur_tile, kick.x, -kick.y, PLAY_GRID_X, PLAY_GRID_Y, board)) {
+                                            cur_tile.x += kick.x;
+                                            cur_tile.y -= kick.y;
+                                            kicked = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            if (!kicked) cur_tile.rotate(-1);
+                        }
+                    }
+                    
+                    if (key == SDLK_SPACE && (!space_hold)){
+                        space_hold = true;
+                        cur_tile.y = get_ghost_y(cur_tile, PLAY_GRID_X, PLAY_GRID_Y, board);
+                        const auto& shape = cur_tile.get_shape();
+
+                        for (size_t r = 0; r < shape.size(); ++r) {
+                            for (size_t c = 0; c < shape[r].size(); ++c) {
+                                if (shape[r][c] != 0) {
+                                    int b_x = cur_tile.x + c;
+                                    int b_y = cur_tile.y + r;
+                                    if (b_y >= 0 && b_y < PLAY_GRID_Y && b_x >= 0 && b_x < PLAY_GRID_X) {
+                                        board[b_y][b_x] = cur_color;
                                     }
                                 }
                             }
                         }
-                        if (!kicked) cur_tile.rotate(-1);
+                        cur_tile.setup(PLAY_GRID_X);
+                        cur_color = rand_choice(colors);
+                        score += 2;
+
+                        if (collide(cur_tile, 0, 0, PLAY_GRID_X, PLAY_GRID_Y, board)){
+                            board.assign(PLAY_GRID_Y, std::vector<char>(PLAY_GRID_X, 0));
+                            score = 0;
+                            lines_cleared_total = 0;
+                        }
                     }
                 }
-                
-                if (key == SDLK_SPACE && (!space_hold)){
-                    space_hold = true;
-                    cur_tile.y = get_ghost_y(cur_tile, PLAY_GRID_X, PLAY_GRID_Y, board);
-                    const auto& shape = cur_tile.get_shape();
+            }
+        }
 
+        if (!is_paused) {
+            if (cur_time - last_fall_time >= current_fall_del) {
+                if (!collide(cur_tile, 0, 1, PLAY_GRID_X, PLAY_GRID_Y, board)) {
+                    cur_tile.y += 1;
+                } else {
+                    const auto& shape = cur_tile.get_shape();
                     for (size_t r = 0; r < shape.size(); ++r) {
                         for (size_t c = 0; c < shape[r].size(); ++c) {
                             if (shape[r][c] != 0) {
@@ -362,42 +480,18 @@ int main(int argc, char* argv[]) {
                     }
                     cur_tile.setup(PLAY_GRID_X);
                     cur_color = rand_choice(colors);
-                    score += 2;
+                    score += 1;
 
                     if (collide(cur_tile, 0, 0, PLAY_GRID_X, PLAY_GRID_Y, board)){
                         board.assign(PLAY_GRID_Y, std::vector<char>(PLAY_GRID_X, 0));
                         score = 0;
+                        lines_cleared_total = 0;
                     }
                 }
+                last_fall_time = cur_time;
             }
-        }
-
-        if (cur_time - last_fall_time >= current_fall_del) {
-            if (!collide(cur_tile, 0, 1, PLAY_GRID_X, PLAY_GRID_Y, board)) {
-                cur_tile.y += 1;
-            } else {
-                const auto& shape = cur_tile.get_shape();
-                for (size_t r = 0; r < shape.size(); ++r) {
-                    for (size_t c = 0; c < shape[r].size(); ++c) {
-                        if (shape[r][c] != 0) {
-                            int b_x = cur_tile.x + c;
-                            int b_y = cur_tile.y + r;
-                            if (b_y >= 0 && b_y < PLAY_GRID_Y && b_x >= 0 && b_x < PLAY_GRID_X) {
-                                board[b_y][b_x] = cur_color;
-                            }
-                        }
-                    }
-                }
-                cur_tile.setup(PLAY_GRID_X);
-                cur_color = rand_choice(colors);
-                score += 1;
-
-                if (collide(cur_tile, 0, 0, PLAY_GRID_X, PLAY_GRID_Y, board)){
-                    board.assign(PLAY_GRID_Y, std::vector<char>(PLAY_GRID_X, 0));
-                    score = 0;
-                }
-            }
-            last_fall_time = cur_time;
+        } else {
+            last_fall_time = cur_time; 
         }
 
         SDL_SetRenderDrawColor(ren, 1, 10, 65, 255);
@@ -426,6 +520,10 @@ int main(int argc, char* argv[]) {
         scoreText.render(ren, "Score: " + std::to_string(score), 20, 70);
         linesText.render(ren, "Line Clears: " + std::to_string(lines_cleared_total), 20, 130);
         noticeText.render(ren, "Tetris C++ with SDL - Henry", W - 300, H - 50);
+
+        if (is_paused) {
+            ui_menu.render(ren, W, H);
+        }
 
         SDL_RenderPresent(ren);
         SDL_Delay(1000 / fps);
@@ -583,10 +681,12 @@ void clear_line(std::vector<std::vector<char>>& board, int play_x, int play_y) {
     }
 
     if (lines_cleared > 0){
-        if (lines_cleared == 1) score += 100 * level;
-        else if (lines_cleared == 2) score += 200 * level;
-        else if (lines_cleared == 3) score += 500 * level;
-        else if (lines_cleared == 4) score += 900 * level;
+        if (lines_cleared == 1) score += 100 * level * (last_clear + 1);
+        else if (lines_cleared == 2) score += 200 * level * (last_clear + 1);
+        else if (lines_cleared == 3) score += 500 * level * (last_clear + 1);
+        else if (lines_cleared == 4) score += 900 * level * (last_clear + 1);
         lines_cleared_total += lines_cleared;
     }
+
+    last_clear = lines_cleared;
 }

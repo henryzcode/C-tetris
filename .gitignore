@@ -4,3 +4,4 @@
 build/
 CMakeLists.txt
 .tmp.drivedownload/
+.vscode/
