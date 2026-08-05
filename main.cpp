@@ -10,6 +10,7 @@
 #include <vector>
 #include <map>
 #include <utility>
+#include <functional>
 
 #include "entities.h"
 
@@ -19,24 +20,27 @@ using KickTable = std::map<std::pair<int, int>, std::vector<SDL_Point>>;
 using KickList = std::map<char, KickTable>;
 
 const int fps = 60;
+uint8_t volume = MIX_MAX_VOLUME;
+uint8_t norm_vol = volume;
 
-bool reset_event = false;
-
-class UI {
+class Button {
 private:
     SDL_Texture* btn_tex = nullptr;
     SDL_Texture* btn_hover_tex = nullptr;
     Mix_Chunk* click_snd = nullptr;
     std::vector<Mix_Chunk*> hover_snds;
-    bool is_hovering = false;
-
-    int btn_w = 124; 
-    int btn_h = 66;
 
 public:
-    UI(SDL_Renderer* ren) {
-        btn_tex = IMG_LoadTexture(ren, "assets/button.png");
-        btn_hover_tex = IMG_LoadTexture(ren, "assets/clicked.png");
+    SDL_Rect rect{0, 0, 124, 66};
+    bool clicked = false;
+    bool hovered = false;
+
+    Button(SDL_Renderer* ren, int x, int y, int w, int h, 
+           const std::string& norm_path, const std::string& hover_path) 
+        : rect{x, y, w, h} 
+    {
+        btn_tex = IMG_LoadTexture(ren, norm_path.c_str());
+        btn_hover_tex = IMG_LoadTexture(ren, hover_path.c_str());
         click_snd = Mix_LoadWAV("assets/sound/clicked.wav");
         
         for (int i = 0; i < 4; ++i) {
@@ -45,61 +49,93 @@ public:
             if (chunk) hover_snds.push_back(chunk);
         }
     }
-    void set_button_size(int w, int h) {
-        btn_w = w;
-        btn_h = h;
-    }
 
-    void handle_event(const SDL_Event& e, bool& paused, int w, int h, bool& event) {
-        if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE) {
-            paused = !paused;
-            is_hovering = false;
-        }
-
-        if (paused) {
-            int btn_x = w / 2 - btn_w / 2;
-            int btn_y = h / 2 - btn_h / 2;
-            
-            if (e.type == SDL_MOUSEMOTION) {
-                int mx = e.motion.x;
-                int my = e.motion.y;
-                bool in_bounds = (mx >= btn_x && mx <= btn_x + btn_w && my >= btn_y && my <= btn_y + btn_h);
-                
-                if (in_bounds && !is_hovering) {
-                    is_hovering = true;
-                    if (!hover_snds.empty()) {
-                        static std::mt19937 ui_gen(std::random_device{}());
-                        std::uniform_int_distribution<size_t> dist(0, hover_snds.size() - 1);
-                        Mix_PlayChannel(-1, hover_snds[dist(ui_gen)], 0);
-                    }
-                } else if (!in_bounds && is_hovering) {
-                    is_hovering = false;
-                }
-            }
-            
-            if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
-                if (is_hovering) {
-                    if (click_snd) Mix_PlayChannel(-1, click_snd, 0);
-                    paused = false;
-                    is_hovering = false;
-                    event = true;
-                }
-            }
+    ~Button() {
+        if (btn_tex) SDL_DestroyTexture(btn_tex);
+        if (btn_hover_tex) SDL_DestroyTexture(btn_hover_tex);
+        if (click_snd) Mix_FreeChunk(click_snd);
+        for (auto snd : hover_snds) {
+            if (snd) Mix_FreeChunk(snd);
         }
     }
 
-    void render(SDL_Renderer* ren, int w, int h) {
+    void handle_event(const SDL_Event& e) {
+        if (e.type == SDL_MOUSEMOTION || e.type == SDL_MOUSEBUTTONDOWN) {
+            int mx = e.motion.x;
+            int my = e.motion.y;
+            bool in_bounds = (mx >= rect.x && mx <= rect.x + rect.w && my >= rect.y && my <= rect.y + rect.h);
+
+            if (in_bounds && !hovered) {
+                hovered = true;
+                if (!hover_snds.empty()) {
+                    static std::mt19937 ui_gen(std::random_device{}());
+                    std::uniform_int_distribution<size_t> dist(0, hover_snds.size() - 1);
+                    auto chunk = hover_snds[dist(ui_gen)];
+                    Mix_VolumeChunk(chunk, volume / 2);
+                    Mix_PlayChannel(-1, chunk, 0);
+                }
+            } else if (!in_bounds) {
+                hovered = false;
+            }
+
+            if (in_bounds && e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
+                Mix_VolumeChunk(click_snd, volume / 2);
+                if (click_snd) Mix_PlayChannel(-1, click_snd, 0);
+                clicked = true;
+            }
+        }
+        else{
+            clicked = false;
+        }
+    }
+
+    void render(SDL_Renderer* ren) {
+        SDL_Texture* active_tex = (hovered && btn_hover_tex) ? btn_hover_tex : btn_tex;
+        if (active_tex) {
+            SDL_RenderCopy(ren, active_tex, NULL, &rect);
+        }
+    }
+
+    void reset() {
+        clicked = false;
+        hovered = false;
+    }
+};
+
+class PauseMenu {
+public:
+    std::vector<Button*> buttons;
+
+    ~PauseMenu() {
+        for (auto btn : buttons) delete btn;
+        buttons.clear();
+    }
+
+    void add_button(SDL_Renderer* ren, int x, int y, int w, int h, 
+                    const std::string& btn_path, const std::string& hover_path) {
+        buttons.push_back(new Button(ren, x, y, w, h, btn_path, hover_path));
+    }
+
+    void handle_event(const SDL_Event& e) {
+        for (auto btn : buttons) {
+            btn->handle_event(e);
+        }
+    }
+
+    void reset_events() {
+        for (auto btn : buttons) {
+            btn->clicked = false;
+        }
+    }
+
+    void render(SDL_Renderer* ren, int screen_w, int screen_h) {
         SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(ren, 0, 0, 0, 180);
-        SDL_Rect screen_rect = {0, 0, w, h};
+        SDL_Rect screen_rect = {0, 0, screen_w, screen_h};
         SDL_RenderFillRect(ren, &screen_rect);
 
-        SDL_Rect btn_rect = {w / 2 - btn_w / 2, h / 2 - btn_h / 2, btn_w, btn_h};
-        
-        if (is_hovering && btn_hover_tex) {
-            SDL_RenderCopy(ren, btn_hover_tex, NULL, &btn_rect);
-        } else if (btn_tex) {
-            SDL_RenderCopy(ren, btn_tex, NULL, &btn_rect);
+        for (auto btn : buttons) {
+            btn->render(ren);
         }
     }
 };
@@ -174,7 +210,7 @@ const KickList wall_kicks = {
 void draw_grid(SDL_Renderer* ren, const int g_size, const int w, const int h, const int grid_x, const int grid_y);
 std::vector<std::string> load_music();
 std::map<char, SDL_Texture*> load_textures(SDL_Renderer* ren);
-void draw_matrix(SDL_Renderer* ren, const Tetro& block, int tetro_x, int tetro_y, int ghost_y, int start_x, int start_y, int g_size, char color_key, const std::map<char, SDL_Texture*>& textures);
+void draw_matrix(SDL_Renderer* ren, const Tetro& block, int tetro_x, int tetro_y, int ghost_y, int start_x, int start_y, int g_size, char color_key, const std::map<char, SDL_Texture*>& textures, int grid_x, int grid_y, int w, const Tetro& next, char next_color, SDL_Rect* next_bg);
 char rand_choice(const std::vector<char>& vec);
 bool collide(const Tetro& block, int off_x, int off_y, int play_grid_x, int play_grid_y, const std::vector<std::vector<char>>& board);
 void clear_line(std::vector<std::vector<char>>& board, int play_x, int play_y);
@@ -184,7 +220,7 @@ const std::string BASE_MUSIC_DIR = "assets/music/";
 std::random_device rd;
 std::mt19937 g(rd());
 
-int fall_delay = 75;
+int fall_delay = 90;
 int level = 500 / fall_delay;
 int lines_cleared_total = 0;
 int score = 0;
@@ -226,7 +262,7 @@ int main(int argc, char* argv[]) {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) return 1;
     if (TTF_Init() != 0) return 1;
     if (!(IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG)) return 1;
-    if (Mix_OpenAudio(48000, AUDIO_F32SYS, 2, 4096) < 0) return 1;
+    if (Mix_OpenAudio(48000, AUDIO_F32SYS, 2, 1024) < 0) return 1;
 
     int mixer_flag = MIX_INIT_MP3;
     if ((Mix_Init(mixer_flag) & mixer_flag) != mixer_flag) {}
@@ -236,6 +272,8 @@ int main(int argc, char* argv[]) {
 
     MUSIC_END = SDL_RegisterEvents(1);
     Mix_HookMusicFinished(callback);
+
+    Mix_VolumeMusic(volume);
     
     int cur_index = 0;
     if (!playlist.empty()) {
@@ -253,9 +291,12 @@ int main(int argc, char* argv[]) {
     TextCache scoreText(font, FONT_COLOR);
     TextCache linesText(font, FONT_COLOR);
     TextCache noticeText(notice, FONT_COLOR);
+    TextCache nextLabelText(notice, FONT_COLOR);
 
     const int W = DM.w;
     const int H = DM.h;
+
+    SDL_Rect next_piece_bg = {0, 0, 0, 0};
 
     const int G_SIZE = 30; 
     const int PLAY_W = 600;
@@ -272,18 +313,31 @@ int main(int argc, char* argv[]) {
         SDL_WINDOW_SHOWN | SDL_WINDOW_FULLSCREEN_DESKTOP
     );
 
+    SDL_Event event;
+
     SDL_Renderer* ren = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
 
-    UI ui_menu(ren);
     bool is_paused = false;
     bool running = true;
-    SDL_Event event;
+
+    PauseMenu menu;
+    int btn_w = 124, btn_h = 66, btn_gap = 20;
+    int center_x = W / 2 - btn_w / 2;
+    int start_y_ = H / 2 - (btn_h * 2 + btn_gap) / 2;
+
+    menu.add_button(ren, center_x, start_y_, btn_w, btn_h, "assets/button.png", "assets/clicked.png");
+    menu.add_button(ren, center_x, start_y_ + btn_h + btn_gap, btn_w, btn_h, "assets/menu.png", "assets/menu_c.png");
+    menu.add_button(ren, center_x, start_y_ + btn_h + btn_gap + btn_h + btn_gap, btn_w, btn_h, "assets/quit.png", "assets/quit_c.png");
 
     const auto txture = load_textures(ren);
 
     Tetro cur_tile;
     cur_tile.setup(PLAY_GRID_X);
     char cur_color = rand_choice(colors);
+
+    Tetro next_tile;
+    next_tile.setup(PLAY_GRID_X);
+    char next_color = rand_choice(colors);
 
     std::vector<std::vector<char>> board(PLAY_GRID_Y, std::vector<char>(PLAY_GRID_X, 0));
 
@@ -296,13 +350,41 @@ int main(int argc, char* argv[]) {
     bool space_hold = false;
     bool up_hold = false;
 
+    bool esc_held = false;
+
     while (running) {
         Uint64 cur_time = SDL_GetTicks64();
         int current_fall_del = fall_delay;
+        const Uint8 *state = SDL_GetKeyboardState(NULL);
+
+        if (state[SDL_SCANCODE_F1] && volume - 2 >= 0){
+            volume -= 2;
+            Mix_VolumeMusic(volume);
+            if (is_paused){
+                if (volume > MIX_MAX_VOLUME / 2){
+                    volume = MIX_MAX_VOLUME / 2;
+                }
+                norm_vol = volume * 2;
+            }
+            else{
+                norm_vol = volume;
+            }
+        }
+        if (state[SDL_SCANCODE_F2] && volume + 2 <= MIX_MAX_VOLUME){
+            volume += 2;
+            Mix_VolumeMusic(volume);
+            if (is_paused){
+                if (volume > MIX_MAX_VOLUME / 2){
+                    volume = MIX_MAX_VOLUME / 2;
+                }
+                norm_vol = volume * 2;
+            }
+            else{
+                norm_vol = volume;
+            }
+        }
 
         if (!is_paused) {
-            const Uint8 *state = SDL_GetKeyboardState(NULL);
-
             if (state[SDL_SCANCODE_DOWN]){
                 current_fall_del = std::max(1, fall_delay / SDF);
             }
@@ -367,17 +449,40 @@ int main(int argc, char* argv[]) {
         }
 
         while (SDL_PollEvent(&event)) {
-            ui_menu.handle_event(event, is_paused, W, H, reset_event);
 
             if (event.type == SDL_QUIT) running = false;
 
-            if (reset_event){
-                board.assign(PLAY_GRID_Y, std::vector<char>(PLAY_GRID_X, 0));
-                score = 0;
-                lines_cleared_total = 0;
-                cur_tile.setup(PLAY_GRID_X);
-                cur_color = rand_choice(colors);
-                reset_event = false;
+            if (event.key.keysym.sym == SDLK_ESCAPE && (!esc_held)) {
+                is_paused = !is_paused;
+                esc_held = true;
+                if (is_paused){
+                    Mix_VolumeMusic(volume / 2);
+                }
+                else{
+                    Mix_VolumeMusic(norm_vol);
+                }
+            }
+
+            if (is_paused) {
+                menu.handle_event(event);
+
+                if (menu.buttons[0]->clicked) {
+                    board.assign(PLAY_GRID_Y, std::vector<char>(PLAY_GRID_X, 0));
+                    score = 0;
+                    lines_cleared_total = 0;
+                    cur_tile.setup(PLAY_GRID_X);
+                    cur_color = rand_choice(colors);
+                    is_paused = false; 
+                    next_tile.setup(PLAY_GRID_X);
+                    next_color = rand_choice(colors);
+                }
+
+                if (menu.buttons[1]->clicked) {
+                }
+
+                if (menu.buttons[2]->clicked){
+                    running = false;
+                }
             }
 
             if (event.type == MUSIC_END && !playlist.empty()){
@@ -390,19 +495,20 @@ int main(int argc, char* argv[]) {
                 if (current_music) Mix_FadeInMusic(current_music, 0, 10000);
             }
 
-            if (!is_paused) {
-                if (event.type == SDL_KEYUP) {
-                    if (event.key.keysym.sym == SDLK_SPACE) space_hold = false;
-                    if (event.key.keysym.sym == SDLK_UP) up_hold = false;
-                }
+            if (event.type == SDL_KEYUP) {
+                if (event.key.keysym.sym == SDLK_SPACE) space_hold = false;
+                if (event.key.keysym.sym == SDLK_UP) up_hold = false;
+                if (event.key.keysym.sym == SDLK_ESCAPE) esc_held = false;
+            }
 
+            if (event.key.keysym.sym == SDLK_DELETE){
+                running = false;
+            }
+
+            if (!is_paused) {
                 if (event.type == SDL_KEYDOWN) {
                     auto key = event.key.keysym.sym;
 
-                    if (key == SDLK_DELETE){
-                        running = false;
-                    }
-                    
                     if (key == SDLK_UP && (!up_hold)){
                         up_hold = true;
                         int current_rot = cur_tile.get_rotation();
@@ -447,9 +553,12 @@ int main(int argc, char* argv[]) {
                                 }
                             }
                         }
-                        cur_tile.setup(PLAY_GRID_X);
-                        cur_color = rand_choice(colors);
-                        score += 2;
+                        
+                        cur_tile = next_tile;
+                        cur_color = next_color;
+                        next_tile.setup(PLAY_GRID_X);
+                        next_color = rand_choice(colors);
+                        score += 3;
 
                         if (collide(cur_tile, 0, 0, PLAY_GRID_X, PLAY_GRID_Y, board)){
                             board.assign(PLAY_GRID_Y, std::vector<char>(PLAY_GRID_X, 0));
@@ -478,8 +587,11 @@ int main(int argc, char* argv[]) {
                             }
                         }
                     }
-                    cur_tile.setup(PLAY_GRID_X);
-                    cur_color = rand_choice(colors);
+
+                    cur_tile = next_tile;
+                    cur_color = next_color;
+                    next_tile.setup(PLAY_GRID_X);
+                    next_color = rand_choice(colors);
                     score += 1;
 
                     if (collide(cur_tile, 0, 0, PLAY_GRID_X, PLAY_GRID_Y, board)){
@@ -512,7 +624,7 @@ int main(int argc, char* argv[]) {
         }
         
         int active_ghost_y = get_ghost_y(cur_tile, PLAY_GRID_X, PLAY_GRID_Y, board);
-        draw_matrix(ren, cur_tile, cur_tile.x, cur_tile.y, active_ghost_y, start_x, start_y, G_SIZE, cur_color, txture);
+        draw_matrix(ren, cur_tile, cur_tile.x, cur_tile.y, active_ghost_y, start_x, start_y, G_SIZE, cur_color, txture, PLAY_GRID_X, PLAY_GRID_Y, W, next_tile, next_color, &next_piece_bg);
 
         clear_line(board, PLAY_GRID_X, PLAY_GRID_Y);
 
@@ -521,8 +633,12 @@ int main(int argc, char* argv[]) {
         linesText.render(ren, "Line Clears: " + std::to_string(lines_cleared_total), 20, 130);
         noticeText.render(ren, "Tetris C++ with SDL - Henry", W - 300, H - 50);
 
+        if (next_piece_bg.w > 0) {
+            nextLabelText.render(ren, "Next Piece:", next_piece_bg.x, next_piece_bg.y - 40);
+        }
+
         if (is_paused) {
-            ui_menu.render(ren, W, H);
+            menu.render(ren, W, H);
         }
 
         SDL_RenderPresent(ren);
@@ -593,12 +709,16 @@ std::map<char, SDL_Texture*> load_textures(SDL_Renderer* ren) {
     return textures;
 }
 
-void draw_matrix(SDL_Renderer* ren, const Tetro& block, int tetro_x, int tetro_y, int ghost_y, int start_x, int start_y, int g_size, char color_key, const std::map<char, SDL_Texture*>& textures) {
+void draw_matrix(SDL_Renderer* ren, const Tetro& block, int tetro_x, int tetro_y, int ghost_y, int start_x, int start_y, int g_size, char color_key, const std::map<char, SDL_Texture*>& textures, int grid_x, int grid_y, int w, const Tetro& next, char next_color, SDL_Rect* next_bg) {
     auto it = textures.find(color_key);
     if (it == textures.end() || it->second == nullptr) return;
 
     const auto& matrix = block.get_shape(); 
+    const auto& next_matrix = next.get_shape(); 
     SDL_Texture* tex = it->second;
+
+    int grid_w = grid_x * g_size;
+    int starting_draw_x = w / 2 - grid_w / 2 + grid_w + 30;
 
     if (ghost_y >= 0) {
         SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
@@ -623,6 +743,45 @@ void draw_matrix(SDL_Renderer* ren, const Tetro& block, int tetro_x, int tetro_y
                 SDL_Rect dest = { start_x + (tetro_x + static_cast<int>(col)) * g_size, 
                                   start_y + (tetro_y + static_cast<int>(row)) * g_size, 
                                   g_size, g_size };
+                SDL_RenderCopy(ren, tex, nullptr, &dest);
+            }
+        }
+    }
+
+    it = textures.find(next_color);
+    if (it == textures.end() || it->second == nullptr) return;
+    tex = it->second;
+
+    int preview_start_y = 100;
+    
+    int padding = 20;
+    int max_tetro_size = 4;
+    
+    SDL_Rect bg_rect = {
+        starting_draw_x - padding,
+        preview_start_y - padding,
+        (max_tetro_size * g_size) + (padding * 2),
+        (max_tetro_size * g_size) + (padding * 2)
+    };
+
+    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+    SDL_RenderFillRect(ren, &bg_rect);
+
+    SDL_SetRenderDrawColor(ren, 50, 50, 50, 255);
+    SDL_RenderDrawRect(ren, &bg_rect);
+    
+    if (next_bg) {
+        *next_bg = bg_rect;
+    }
+
+    for (size_t row = 0; row < next_matrix.size(); ++row) {
+        for (size_t col = 0; col < next_matrix[row].size(); ++col) {
+            if (next_matrix[row][col] != 0) { 
+                SDL_Rect dest = { 
+                    starting_draw_x + static_cast<int>(col) * g_size, 
+                    preview_start_y + static_cast<int>(row) * g_size, 
+                    g_size, g_size 
+                };
                 SDL_RenderCopy(ren, tex, nullptr, &dest);
             }
         }
