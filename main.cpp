@@ -227,7 +227,7 @@ int score = 0;
 
 const int DAS = 120;
 const int ARR = 20;
-const int SDF = 10;
+const int SDF = 20;
 
 const Uint8 GHOST_ALPHA = 70;
 const SDL_Color FONT_COLOR = {255, 255, 255, 255};
@@ -628,7 +628,7 @@ int main(int argc, char* argv[]) {
 
         clear_line(board, PLAY_GRID_X, PLAY_GRID_Y);
 
-        titleText.render(ren, "Tetris 1.0", 20, 10);
+        titleText.render(ren, "Tetris 2.0", 20, 10);
         scoreText.render(ren, "Score: " + std::to_string(score), 20, 70);
         linesText.render(ren, "Line Clears: " + std::to_string(lines_cleared_total), 20, 130);
         noticeText.render(ren, "Tetris C++ with SDL - Henry", W - 300, H - 50);
