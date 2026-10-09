@@ -52,16 +52,16 @@ A classic Tetris clone written in C++ using the SDL2 library, created by Henry.
 
 To compile and run this project, you will need a compiler that supports C++20 (for `std::ranges::shuffle`) and the following libraries installed on your system:
 
-* SDL2
+* SDL3
 
 
-* SDL2_image
+* SDL3_image
 
 
-* SDL2_mixer
+* SDL3_mixer
 
 
-* SDL2_ttf
+* SDL3_ttf
 
 
 
