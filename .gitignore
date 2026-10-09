@@ -6,3 +6,4 @@ CMakeLists.txt
 .tmp.drivedownload/
 .vscode/
 .vs/
+out/

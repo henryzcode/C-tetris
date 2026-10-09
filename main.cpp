@@ -1,7 +1,7 @@
-#include <SDL2/SDL.h>
-#include <SDL_mixer.h>
-#include <SDL_image.h>
-#include <SDL_ttf.h>
+#include <SDL3/SDL.h>
+#include <SDL3_mixer/SDL_mixer.h>
+#include <SDL3_image/SDL_image.h>
+#include <SDL3_ttf/SDL_ttf.h>
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
@@ -11,6 +11,7 @@
 #include <map>
 #include <utility>
 #include <functional>
+#include <ranges>
 
 #include "entities.h"
 
@@ -20,71 +21,70 @@ using KickTable = std::map<std::pair<int, int>, std::vector<SDL_Point>>;
 using KickList = std::map<char, KickTable>;
 
 const int fps = 60;
-uint8_t volume = MIX_MAX_VOLUME;
-uint8_t norm_vol = volume;
+float volume = 1.0f;
+float norm_vol = volume;
+
+MIX_Mixer* g_mixer = nullptr;
 
 class Button {
 private:
     SDL_Texture* btn_tex = nullptr;
     SDL_Texture* btn_hover_tex = nullptr;
-    Mix_Chunk* click_snd = nullptr;
-    std::vector<Mix_Chunk*> hover_snds;
+    MIX_Audio* click_snd = nullptr;
+    std::vector<MIX_Audio*> hover_snds;
 
 public:
-    SDL_Rect rect{0, 0, 124, 66};
+    SDL_FRect rect{0, 0, 124, 66};
     bool clicked = false;
     bool hovered = false;
 
-    Button(SDL_Renderer* ren, int x, int y, int w, int h, 
+    Button(SDL_Renderer* ren, float x, float y, float w, float h, 
            const std::string& norm_path, const std::string& hover_path) 
         : rect{x, y, w, h} 
     {
         btn_tex = IMG_LoadTexture(ren, norm_path.c_str());
         btn_hover_tex = IMG_LoadTexture(ren, hover_path.c_str());
-        click_snd = Mix_LoadWAV("assets/sound/clicked.wav");
-        
-        for (int i = 0; i < 4; ++i) {
-            std::string path = "assets/sound/" + std::to_string(i) + ".wav";
-            Mix_Chunk* chunk = Mix_LoadWAV(path.c_str());
-            if (chunk) hover_snds.push_back(chunk);
+        if (g_mixer) {
+            click_snd = MIX_LoadAudio(g_mixer, "assets/sound/clicked.wav", true);
+            for (int i = 0; i < 4; ++i) {
+                std::string path = "assets/sound/" + std::to_string(i) + ".wav";
+                MIX_Audio* chunk = MIX_LoadAudio(g_mixer, path.c_str(), true);
+                if (chunk) hover_snds.push_back(chunk);
+            }
         }
     }
 
     ~Button() {
         if (btn_tex) SDL_DestroyTexture(btn_tex);
         if (btn_hover_tex) SDL_DestroyTexture(btn_hover_tex);
-        if (click_snd) Mix_FreeChunk(click_snd);
+        if (click_snd) MIX_DestroyAudio(click_snd);
         for (auto snd : hover_snds) {
-            if (snd) Mix_FreeChunk(snd);
+            if (snd) MIX_DestroyAudio(snd);
         }
     }
 
     void handle_event(const SDL_Event& e) {
-        if (e.type == SDL_MOUSEMOTION || e.type == SDL_MOUSEBUTTONDOWN) {
-            int mx = e.motion.x;
-            int my = e.motion.y;
+        if (e.type == SDL_EVENT_MOUSE_MOTION || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+            float mx = (e.type == SDL_EVENT_MOUSE_MOTION) ? e.motion.x : e.button.x;
+            float my = (e.type == SDL_EVENT_MOUSE_MOTION) ? e.motion.y : e.button.y;
             bool in_bounds = (mx >= rect.x && mx <= rect.x + rect.w && my >= rect.y && my <= rect.y + rect.h);
 
             if (in_bounds && !hovered) {
                 hovered = true;
-                if (!hover_snds.empty()) {
+                if (!hover_snds.empty() && g_mixer) {
                     static std::mt19937 ui_gen(std::random_device{}());
                     std::uniform_int_distribution<size_t> dist(0, hover_snds.size() - 1);
-                    auto chunk = hover_snds[dist(ui_gen)];
-                    Mix_VolumeChunk(chunk, volume / 2);
-                    Mix_PlayChannel(-1, chunk, 0);
+                    MIX_PlayAudio(g_mixer, hover_snds[dist(ui_gen)]);
                 }
             } else if (!in_bounds) {
                 hovered = false;
             }
 
-            if (in_bounds && e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
-                Mix_VolumeChunk(click_snd, volume / 2);
-                if (click_snd) Mix_PlayChannel(-1, click_snd, 0);
+            if (in_bounds && e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
+                if (click_snd && g_mixer) MIX_PlayAudio(g_mixer, click_snd);
                 clicked = true;
             }
-        }
-        else{
+        } else {
             clicked = false;
         }
     }
@@ -92,7 +92,7 @@ public:
     void render(SDL_Renderer* ren) {
         SDL_Texture* active_tex = (hovered && btn_hover_tex) ? btn_hover_tex : btn_tex;
         if (active_tex) {
-            SDL_RenderCopy(ren, active_tex, NULL, &rect);
+            SDL_RenderTexture(ren, active_tex, nullptr, &rect);
         }
     }
 
@@ -111,7 +111,7 @@ public:
         buttons.clear();
     }
 
-    void add_button(SDL_Renderer* ren, int x, int y, int w, int h, 
+    void add_button(SDL_Renderer* ren, float x, float y, float w, float h, 
                     const std::string& btn_path, const std::string& hover_path) {
         buttons.push_back(new Button(ren, x, y, w, h, btn_path, hover_path));
     }
@@ -128,10 +128,10 @@ public:
         }
     }
 
-    void render(SDL_Renderer* ren, int screen_w, int screen_h) {
+    void render(SDL_Renderer* ren, float screen_w, float screen_h) {
         SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(ren, 0, 0, 0, 180);
-        SDL_Rect screen_rect = {0, 0, screen_w, screen_h};
+        SDL_FRect screen_rect = {0.0f, 0.0f, screen_w, screen_h};
         SDL_RenderFillRect(ren, &screen_rect);
 
         for (auto btn : buttons) {
@@ -144,7 +144,7 @@ class TextCache {
 private:
     SDL_Texture* texture = nullptr;
     std::string current_text = "";
-    int width = 0, height = 0;
+    float width = 0.0f, height = 0.0f;
     TTF_Font* font = nullptr;
     SDL_Color color;
 
@@ -158,24 +158,24 @@ public:
     TextCache(const TextCache&) = delete;
     TextCache& operator=(const TextCache&) = delete;
 
-    void render(SDL_Renderer* ren, const std::string& new_text, int x, int y) {
+    void render(SDL_Renderer* ren, const std::string& new_text, float x, float y) {
         if (new_text != current_text || !texture) {
             if (texture) {
                 SDL_DestroyTexture(texture);
                 texture = nullptr;
             }
             current_text = new_text;
-            SDL_Surface* surface = TTF_RenderText_Solid(font, current_text.c_str(), color);
+            SDL_Surface* surface = TTF_RenderText_Solid(font, current_text.c_str(), 0, color);
             if (surface) {
-                width = surface->w;
-                height = surface->h;
+                width = static_cast<float>(surface->w);
+                height = static_cast<float>(surface->h);
                 texture = SDL_CreateTextureFromSurface(ren, surface);
-                SDL_FreeSurface(surface);
+                SDL_DestroySurface(surface);
             }
         }
         if (texture) {
-            SDL_Rect dest = { x, y, width, height };
-            SDL_RenderCopy(ren, texture, NULL, &dest);
+            SDL_FRect dest = { x, y, width, height };
+            SDL_RenderTexture(ren, texture, nullptr, &dest);
         }
     }
 };
@@ -210,7 +210,7 @@ const KickList wall_kicks = {
 void draw_grid(SDL_Renderer* ren, const int g_size, const int w, const int h, const int grid_x, const int grid_y);
 std::vector<std::string> load_music();
 std::map<char, SDL_Texture*> load_textures(SDL_Renderer* ren);
-void draw_matrix(SDL_Renderer* ren, const Tetro& block, int tetro_x, int tetro_y, int ghost_y, int start_x, int start_y, int g_size, char color_key, const std::map<char, SDL_Texture*>& textures, int grid_x, int grid_y, int w, const Tetro& next, char next_color, SDL_Rect* next_bg);
+void draw_matrix(SDL_Renderer* ren, const Tetro& block, int tetro_x, int tetro_y, int ghost_y, int start_x, int start_y, int g_size, char color_key, const std::map<char, SDL_Texture*>& textures, int grid_x, int grid_y, int w, const Tetro& next, char next_color, SDL_FRect* next_bg);
 char rand_choice(const std::vector<char>& vec);
 bool collide(const Tetro& block, int off_x, int off_y, int play_grid_x, int play_grid_y, const std::vector<std::vector<char>>& board);
 void clear_line(std::vector<std::vector<char>>& board, int play_x, int play_y);
@@ -229,7 +229,7 @@ const int DAS = 120;
 const int ARR = 20;
 const int SDF = 20;
 
-const Uint8 GHOST_ALPHA = 70;
+const float GHOST_ALPHA = 70.0f / 255.0f;
 const SDL_Color FONT_COLOR = {255, 255, 255, 255};
 
 int last_clear = 0;
@@ -241,15 +241,6 @@ std::vector<Uint64> last_move_time = {0, 0};
 enum {LEFT, RIGHT};
 std::vector<int> directions = {LEFT, RIGHT};
 
-Uint32 MUSIC_END = 0;
-
-void callback() {
-    SDL_Event event;
-    SDL_zero(event);
-    event.type = MUSIC_END;
-    SDL_PushEvent(&event);
-}
-
 int get_ghost_y(const Tetro& block, int play_grid_x, int play_grid_y, const std::vector<std::vector<char>>& board) {
     int ghost_off_y = 0;
     while (!collide(block, 0, ghost_off_y + 1, play_grid_x, play_grid_y, board)) {
@@ -259,30 +250,45 @@ int get_ghost_y(const Tetro& block, int play_grid_x, int play_grid_y, const std:
 }
 
 int main(int argc, char* argv[]) {
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) return 1;
-    if (TTF_Init() != 0) return 1;
-    if (!(IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG)) return 1;
-    if (Mix_OpenAudio(48000, AUDIO_F32SYS, 2, 1024) < 0) return 1;
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) return 1;
+    if (!TTF_Init()) return 1;
+    if (!MIX_Init()) return 1;
 
-    int mixer_flag = MIX_INIT_MP3;
-    if ((Mix_Init(mixer_flag) & mixer_flag) != mixer_flag) {}
-
-    std::vector<std::string> playlist = load_music();
-    Mix_Music* current_music = nullptr;
-
-    MUSIC_END = SDL_RegisterEvents(1);
-    Mix_HookMusicFinished(callback);
-
-    Mix_VolumeMusic(volume);
-    
-    int cur_index = 0;
-    if (!playlist.empty()) {
-        current_music = Mix_LoadMUS(playlist[cur_index].c_str());
-        if (current_music) Mix_FadeInMusic(current_music, 0, 10000);
+    g_mixer = MIX_CreateMixerDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, nullptr);
+    if (g_mixer) {
+        MIX_SetMixerGain(g_mixer, volume);
     }
 
-    SDL_DisplayMode DM;
-    SDL_GetDesktopDisplayMode(0, &DM);
+    std::vector<std::string> playlist = load_music();
+    MIX_Track* music_track = nullptr;
+    MIX_Audio* current_music_audio = nullptr;
+    int cur_index = 0;
+
+    if (g_mixer) {
+        music_track = MIX_CreateTrack(g_mixer);
+        if (!playlist.empty()) {
+            current_music_audio = MIX_LoadAudio(g_mixer, playlist[cur_index].c_str(), false);
+            if (current_music_audio && music_track) {
+                MIX_SetTrackAudio(music_track, current_music_audio);
+                MIX_PlayTrack(music_track, 0);
+            }
+        }
+    }
+
+    const SDL_DisplayMode* DM = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
+    const int W = DM ? DM->w : 1920;
+    const int H = DM ? DM->h : 1080;
+
+    SDL_Window* window = SDL_CreateWindow(
+        "My Tetris",
+        W, H,
+        SDL_WINDOW_FULLSCREEN
+    );
+    if (!window) return 1;
+
+    SDL_Renderer* ren = SDL_CreateRenderer(window, nullptr);
+    if (!ren) return 1;
+    SDL_SetRenderVSync(ren, 1);
 
     TTF_Font* font = TTF_OpenFont("assets/pixel.ttf", 50);
     TTF_Font* notice = TTF_OpenFont("assets/pixel.ttf", 30);
@@ -293,10 +299,7 @@ int main(int argc, char* argv[]) {
     TextCache noticeText(notice, FONT_COLOR);
     TextCache nextLabelText(notice, FONT_COLOR);
 
-    const int W = DM.w;
-    const int H = DM.h;
-
-    SDL_Rect next_piece_bg = {0, 0, 0, 0};
+    SDL_FRect next_piece_bg = {0.0f, 0.0f, 0.0f, 0.0f};
 
     const int G_SIZE = 30; 
     const int PLAY_W = 600;
@@ -306,28 +309,19 @@ int main(int argc, char* argv[]) {
     const int PLAY_GRID_X = PLAY_W / G_SIZE;
     const int PLAY_GRID_Y = available_height / G_SIZE;
 
-    SDL_Window* window = SDL_CreateWindow(
-        "My Tetris",
-        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        W, H,
-        SDL_WINDOW_SHOWN | SDL_WINDOW_FULLSCREEN_DESKTOP
-    );
-
     SDL_Event event;
-
-    SDL_Renderer* ren = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
 
     bool is_paused = false;
     bool running = true;
 
     PauseMenu menu;
-    int btn_w = 124, btn_h = 66, btn_gap = 20;
-    int center_x = W / 2 - btn_w / 2;
-    int start_y_ = H / 2 - (btn_h * 2 + btn_gap) / 2;
+    float btn_w = 124.0f, btn_h = 66.0f, btn_gap = 20.0f;
+    float center_x = static_cast<float>(W) / 2.0f - btn_w / 2.0f;
+    float start_y_ = static_cast<float>(H) / 2.0f - (btn_h * 2.0f + btn_gap) / 2.0f;
 
     menu.add_button(ren, center_x, start_y_, btn_w, btn_h, "assets/button.png", "assets/clicked.png");
     menu.add_button(ren, center_x, start_y_ + btn_h + btn_gap, btn_w, btn_h, "assets/menu.png", "assets/menu_c.png");
-    menu.add_button(ren, center_x, start_y_ + btn_h + btn_gap + btn_h + btn_gap, btn_w, btn_h, "assets/quit.png", "assets/quit_c.png");
+    menu.add_button(ren, center_x, start_y_ + (btn_h + btn_gap) * 2.0f, btn_w, btn_h, "assets/quit.png", "assets/quit_c.png");
 
     const auto txture = load_textures(ren);
 
@@ -349,59 +343,42 @@ int main(int argc, char* argv[]) {
     Uint64 last_fall_time = 0;
     bool space_hold = false;
     bool up_hold = false;
-
     bool esc_held = false;
 
     while (running) {
-        Uint64 cur_time = SDL_GetTicks64();
+        Uint64 cur_time = SDL_GetTicks();
         int current_fall_del = fall_delay;
-        const Uint8 *state = SDL_GetKeyboardState(NULL);
+        const bool* state = SDL_GetKeyboardState(nullptr);
 
-        if (state[SDL_SCANCODE_F1] && volume - 2 >= 0){
-            volume -= 2;
-            Mix_VolumeMusic(volume);
-            if (is_paused){
-                if (volume > MIX_MAX_VOLUME / 2){
-                    volume = MIX_MAX_VOLUME / 2;
-                }
-                norm_vol = volume * 2;
-            }
-            else{
-                norm_vol = volume;
-            }
+        if (state[SDL_SCANCODE_F1] && volume - 0.02f >= 0.0f) {
+            volume -= 0.02f;
+            if (g_mixer) MIX_SetMixerGain(g_mixer, is_paused ? volume / 2.0f : volume);
+            norm_vol = volume;
         }
-        if (state[SDL_SCANCODE_F2] && volume + 2 <= MIX_MAX_VOLUME){
-            volume += 2;
-            Mix_VolumeMusic(volume);
-            if (is_paused){
-                if (volume > MIX_MAX_VOLUME / 2){
-                    volume = MIX_MAX_VOLUME / 2;
-                }
-                norm_vol = volume * 2;
-            }
-            else{
-                norm_vol = volume;
-            }
+        if (state[SDL_SCANCODE_F2] && volume + 0.02f <= 1.0f) {
+            volume += 0.02f;
+            if (g_mixer) MIX_SetMixerGain(g_mixer, is_paused ? volume / 2.0f : volume);
+            norm_vol = volume;
         }
 
         if (!is_paused) {
-            if (state[SDL_SCANCODE_DOWN]){
+            if (state[SDL_SCANCODE_DOWN]) {
                 current_fall_del = std::max(1, fall_delay / SDF);
             }
 
             std::vector<bool> input_state = {
-                (bool) state[SDL_SCANCODE_LEFT],
-                (bool) state[SDL_SCANCODE_RIGHT],
+                (bool)state[SDL_SCANCODE_LEFT],
+                (bool)state[SDL_SCANCODE_RIGHT],
             };
 
-            for (int dir: directions){
-                if (input_state[dir]){
-                    if (!active_dir[dir]){
+            for (int dir : directions) {
+                if (input_state[dir]) {
+                    if (!active_dir[dir]) {
                         active_dir[dir] = true;
                         das_triggered[dir] = false;
                         last_move_time[dir] = cur_time;
 
-                        switch (dir){
+                        switch (dir) {
                             case LEFT:
                                 if (!collide(cur_tile, -1, 0, PLAY_GRID_X, PLAY_GRID_Y, board)) { cur_tile.x -= 1; }
                                 break;
@@ -409,25 +386,24 @@ int main(int argc, char* argv[]) {
                                 if (!collide(cur_tile, 1, 0, PLAY_GRID_X, PLAY_GRID_Y, board)) { cur_tile.x += 1; }
                                 break;
                         }
-                    }
-                    else {
+                    } else {
                         Uint64 time_held = cur_time - last_move_time[dir];
-                        if ((!das_triggered[dir]) && time_held >= DAS){
+                        if ((!das_triggered[dir]) && time_held >= DAS) {
                             das_triggered[dir] = true;
                             last_move_time[dir] = cur_time;
                             time_held = 0;
                         }
 
-                        if (das_triggered[dir]){
-                            int moves_to_make = (ARR == 0) ? PLAY_GRID_X : time_held / ARR;
+                        if (das_triggered[dir]) {
+                            int moves_to_make = (ARR == 0) ? PLAY_GRID_X : static_cast<int>(time_held / ARR);
                         
-                            if (moves_to_make > 0){
-                                for (int _ = 0; _ < moves_to_make; _++){
-                                    if (dir == LEFT){
+                            if (moves_to_make > 0) {
+                                for (int _ = 0; _ < moves_to_make; _++) {
+                                    if (dir == LEFT) {
                                         if (!collide(cur_tile, -1, 0, PLAY_GRID_X, PLAY_GRID_Y, board)) { cur_tile.x -= 1; }
                                         else { break; }
                                     }
-                                    if (dir == RIGHT){
+                                    if (dir == RIGHT) {
                                         if (!collide(cur_tile, 1, 0, PLAY_GRID_X, PLAY_GRID_Y, board)) { cur_tile.x += 1; }
                                         else { break; }
                                     }
@@ -442,24 +418,20 @@ int main(int argc, char* argv[]) {
                 }
             }
         } else {
-            for (int dir: directions) {
+            for (int dir : directions) {
                 active_dir[dir] = false;
                 das_triggered[dir] = false;
             }
         }
 
         while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_EVENT_QUIT) running = false;
 
-            if (event.type == SDL_QUIT) running = false;
-
-            if (event.key.keysym.sym == SDLK_ESCAPE && (!esc_held)) {
+            if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE && (!esc_held)) {
                 is_paused = !is_paused;
                 esc_held = true;
-                if (is_paused){
-                    Mix_VolumeMusic(volume / 2);
-                }
-                else{
-                    Mix_VolumeMusic(norm_vol);
+                if (g_mixer) {
+                    MIX_SetMixerGain(g_mixer, is_paused ? volume / 2.0f : norm_vol);
                 }
             }
 
@@ -480,36 +452,26 @@ int main(int argc, char* argv[]) {
                 if (menu.buttons[1]->clicked) {
                 }
 
-                if (menu.buttons[2]->clicked){
+                if (menu.buttons[2]->clicked) {
                     running = false;
                 }
             }
 
-            if (event.type == MUSIC_END && !playlist.empty()){
-                if (current_music) Mix_FreeMusic(current_music);
-                
-                cur_index = (cur_index + 1) % playlist.size();
-                if (cur_index == 0) std::ranges::shuffle(playlist, g);
-
-                current_music = Mix_LoadMUS(playlist[cur_index].c_str());
-                if (current_music) Mix_FadeInMusic(current_music, 0, 10000);
+            if (event.type == SDL_EVENT_KEY_UP) {
+                if (event.key.key == SDLK_SPACE) space_hold = false;
+                if (event.key.key == SDLK_UP) up_hold = false;
+                if (event.key.key == SDLK_ESCAPE) esc_held = false;
             }
 
-            if (event.type == SDL_KEYUP) {
-                if (event.key.keysym.sym == SDLK_SPACE) space_hold = false;
-                if (event.key.keysym.sym == SDLK_UP) up_hold = false;
-                if (event.key.keysym.sym == SDLK_ESCAPE) esc_held = false;
-            }
-
-            if (event.key.keysym.sym == SDLK_DELETE){
+            if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_DELETE) {
                 running = false;
             }
 
             if (!is_paused) {
-                if (event.type == SDL_KEYDOWN) {
-                    auto key = event.key.keysym.sym;
+                if (event.type == SDL_EVENT_KEY_DOWN) {
+                    auto key = event.key.key;
 
-                    if (key == SDLK_UP && (!up_hold)){
+                    if (key == SDLK_UP && (!up_hold)) {
                         up_hold = true;
                         int current_rot = cur_tile.get_rotation();
                         cur_tile.rotate(1);
@@ -537,7 +499,7 @@ int main(int argc, char* argv[]) {
                         }
                     }
                     
-                    if (key == SDLK_SPACE && (!space_hold)){
+                    if (key == SDLK_SPACE && (!space_hold)) {
                         space_hold = true;
                         cur_tile.y = get_ghost_y(cur_tile, PLAY_GRID_X, PLAY_GRID_Y, board);
                         const auto& shape = cur_tile.get_shape();
@@ -545,8 +507,8 @@ int main(int argc, char* argv[]) {
                         for (size_t r = 0; r < shape.size(); ++r) {
                             for (size_t c = 0; c < shape[r].size(); ++c) {
                                 if (shape[r][c] != 0) {
-                                    int b_x = cur_tile.x + c;
-                                    int b_y = cur_tile.y + r;
+                                    int b_x = cur_tile.x + static_cast<int>(c);
+                                    int b_y = cur_tile.y + static_cast<int>(r);
                                     if (b_y >= 0 && b_y < PLAY_GRID_Y && b_x >= 0 && b_x < PLAY_GRID_X) {
                                         board[b_y][b_x] = cur_color;
                                     }
@@ -560,7 +522,7 @@ int main(int argc, char* argv[]) {
                         next_color = rand_choice(colors);
                         score += 3;
 
-                        if (collide(cur_tile, 0, 0, PLAY_GRID_X, PLAY_GRID_Y, board)){
+                        if (collide(cur_tile, 0, 0, PLAY_GRID_X, PLAY_GRID_Y, board)) {
                             board.assign(PLAY_GRID_Y, std::vector<char>(PLAY_GRID_X, 0));
                             score = 0;
                             lines_cleared_total = 0;
@@ -571,7 +533,7 @@ int main(int argc, char* argv[]) {
         }
 
         if (!is_paused) {
-            if (cur_time - last_fall_time >= current_fall_del) {
+            if (cur_time - last_fall_time >= static_cast<Uint64>(current_fall_del)) {
                 if (!collide(cur_tile, 0, 1, PLAY_GRID_X, PLAY_GRID_Y, board)) {
                     cur_tile.y += 1;
                 } else {
@@ -579,8 +541,8 @@ int main(int argc, char* argv[]) {
                     for (size_t r = 0; r < shape.size(); ++r) {
                         for (size_t c = 0; c < shape[r].size(); ++c) {
                             if (shape[r][c] != 0) {
-                                int b_x = cur_tile.x + c;
-                                int b_y = cur_tile.y + r;
+                                int b_x = cur_tile.x + static_cast<int>(c);
+                                int b_y = cur_tile.y + static_cast<int>(r);
                                 if (b_y >= 0 && b_y < PLAY_GRID_Y && b_x >= 0 && b_x < PLAY_GRID_X) {
                                     board[b_y][b_x] = cur_color;
                                 }
@@ -594,7 +556,7 @@ int main(int argc, char* argv[]) {
                     next_color = rand_choice(colors);
                     score += 1;
 
-                    if (collide(cur_tile, 0, 0, PLAY_GRID_X, PLAY_GRID_Y, board)){
+                    if (collide(cur_tile, 0, 0, PLAY_GRID_X, PLAY_GRID_Y, board)) {
                         board.assign(PLAY_GRID_Y, std::vector<char>(PLAY_GRID_X, 0));
                         score = 0;
                         lines_cleared_total = 0;
@@ -616,8 +578,13 @@ int main(int argc, char* argv[]) {
                 if (board[r][c] != 0) {
                     auto it = txture.find(board[r][c]);
                     if (it != txture.end() && it->second != nullptr) {
-                        SDL_Rect dest = { start_x + c * G_SIZE, start_y + r * G_SIZE, G_SIZE, G_SIZE };
-                        SDL_RenderCopy(ren, it->second, nullptr, &dest);
+                        SDL_FRect dest = { 
+                            static_cast<float>(start_x + c * G_SIZE), 
+                            static_cast<float>(start_y + r * G_SIZE), 
+                            static_cast<float>(G_SIZE), 
+                            static_cast<float>(G_SIZE) 
+                        };
+                        SDL_RenderTexture(ren, it->second, nullptr, &dest);
                     }
                 }
             }
@@ -628,17 +595,17 @@ int main(int argc, char* argv[]) {
 
         clear_line(board, PLAY_GRID_X, PLAY_GRID_Y);
 
-        titleText.render(ren, "Tetris 2.0", 20, 10);
-        scoreText.render(ren, "Score: " + std::to_string(score), 20, 70);
-        linesText.render(ren, "Line Clears: " + std::to_string(lines_cleared_total), 20, 130);
-        noticeText.render(ren, "Tetris C++ with SDL - Henry", W - 300, H - 50);
+        titleText.render(ren, "Tetris 2.0", 20.0f, 10.0f);
+        scoreText.render(ren, "Score: " + std::to_string(score), 20.0f, 70.0f);
+        linesText.render(ren, "Line Clears: " + std::to_string(lines_cleared_total), 20.0f, 130.0f);
+        noticeText.render(ren, "Tetris C++ with SDL - Henry", static_cast<float>(W - 300), static_cast<float>(H - 50));
 
         if (next_piece_bg.w > 0) {
-            nextLabelText.render(ren, "Next Piece:", next_piece_bg.x, next_piece_bg.y - 40);
+            nextLabelText.render(ren, "Next Piece:", next_piece_bg.x, next_piece_bg.y - 40.0f);
         }
 
         if (is_paused) {
-            menu.render(ren, W, H);
+            menu.render(ren, static_cast<float>(W), static_cast<float>(H));
         }
 
         SDL_RenderPresent(ren);
@@ -648,15 +615,15 @@ int main(int argc, char* argv[]) {
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(window);
 
-    Mix_HaltMusic();
-    if (current_music) Mix_FreeMusic(current_music);
+    if (music_track) MIX_DestroyTrack(music_track);
+    if (current_music_audio) MIX_DestroyAudio(current_music_audio);
+    if (g_mixer) MIX_DestroyMixer(g_mixer);
 
     for (auto& [key, tex] : txture) {
         if (tex) SDL_DestroyTexture(tex);
     }
 
-    Mix_CloseAudio();
-    Mix_Quit();
+    MIX_Quit();
     TTF_CloseFont(font);
     TTF_CloseFont(notice);
     TTF_Quit();
@@ -672,18 +639,23 @@ void draw_grid(SDL_Renderer* ren, const int g_size, const int w, const int h, co
     int start_x = w / 2 - grid_w / 2;
     int start_y = h / 2 - grid_h / 2;
 
-    SDL_Rect play_area = { start_x, start_y, grid_w, grid_h };
+    SDL_FRect play_area = { 
+        static_cast<float>(start_x), 
+        static_cast<float>(start_y), 
+        static_cast<float>(grid_w), 
+        static_cast<float>(grid_h) 
+    };
     SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
     SDL_RenderFillRect(ren, &play_area);
     
     SDL_SetRenderDrawColor(ren, 31, 31, 31, 255);
     for (int i = 0; i <= grid_x; ++i) {
-        int x = start_x + i * g_size;
-        SDL_RenderDrawLine(ren, x, start_y, x, start_y + grid_h);
+        float x = static_cast<float>(start_x + i * g_size);
+        SDL_RenderLine(ren, x, static_cast<float>(start_y), x, static_cast<float>(start_y + grid_h));
     }
     for (int j = 0; j <= grid_y; ++j) {
-        int y = start_y + j * g_size;
-        SDL_RenderDrawLine(ren, start_x, y, start_x + grid_w, y);
+        float y = static_cast<float>(start_y + j * g_size);
+        SDL_RenderLine(ren, static_cast<float>(start_x), y, static_cast<float>(start_x + grid_w), y);
     }
 }
 
@@ -709,7 +681,7 @@ std::map<char, SDL_Texture*> load_textures(SDL_Renderer* ren) {
     return textures;
 }
 
-void draw_matrix(SDL_Renderer* ren, const Tetro& block, int tetro_x, int tetro_y, int ghost_y, int start_x, int start_y, int g_size, char color_key, const std::map<char, SDL_Texture*>& textures, int grid_x, int grid_y, int w, const Tetro& next, char next_color, SDL_Rect* next_bg) {
+void draw_matrix(SDL_Renderer* ren, const Tetro& block, int tetro_x, int tetro_y, int ghost_y, int start_x, int start_y, int g_size, char color_key, const std::map<char, SDL_Texture*>& textures, int grid_x, int grid_y, int w, const Tetro& next, char next_color, SDL_FRect* next_bg) {
     auto it = textures.find(color_key);
     if (it == textures.end() || it->second == nullptr) return;
 
@@ -722,28 +694,34 @@ void draw_matrix(SDL_Renderer* ren, const Tetro& block, int tetro_x, int tetro_y
 
     if (ghost_y >= 0) {
         SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-        SDL_SetTextureAlphaMod(tex, GHOST_ALPHA);
+        SDL_SetTextureAlphaModFloat(tex, GHOST_ALPHA);
 
         for (size_t row = 0; row < matrix.size(); ++row) {
             for (size_t col = 0; col < matrix[row].size(); ++col) {
                 if (matrix[row][col] != 0) { 
-                    SDL_Rect dest = { start_x + (tetro_x + static_cast<int>(col)) * g_size, 
-                                      start_y + (ghost_y + static_cast<int>(row)) * g_size, 
-                                      g_size, g_size };
-                    SDL_RenderCopy(ren, tex, nullptr, &dest);
+                    SDL_FRect dest = { 
+                        static_cast<float>(start_x + (tetro_x + static_cast<int>(col)) * g_size), 
+                        static_cast<float>(start_y + (ghost_y + static_cast<int>(row)) * g_size), 
+                        static_cast<float>(g_size), 
+                        static_cast<float>(g_size) 
+                    };
+                    SDL_RenderTexture(ren, tex, nullptr, &dest);
                 }
             }
         }
-        SDL_SetTextureAlphaMod(tex, 255);
+        SDL_SetTextureAlphaModFloat(tex, 1.0f);
     }
 
     for (size_t row = 0; row < matrix.size(); ++row) {
         for (size_t col = 0; col < matrix[row].size(); ++col) {
             if (matrix[row][col] != 0) { 
-                SDL_Rect dest = { start_x + (tetro_x + static_cast<int>(col)) * g_size, 
-                                  start_y + (tetro_y + static_cast<int>(row)) * g_size, 
-                                  g_size, g_size };
-                SDL_RenderCopy(ren, tex, nullptr, &dest);
+                SDL_FRect dest = { 
+                    static_cast<float>(start_x + (tetro_x + static_cast<int>(col)) * g_size), 
+                    static_cast<float>(start_y + (tetro_y + static_cast<int>(row)) * g_size), 
+                    static_cast<float>(g_size), 
+                    static_cast<float>(g_size) 
+                };
+                SDL_RenderTexture(ren, tex, nullptr, &dest);
             }
         }
     }
@@ -753,22 +731,21 @@ void draw_matrix(SDL_Renderer* ren, const Tetro& block, int tetro_x, int tetro_y
     tex = it->second;
 
     int preview_start_y = 100;
-    
     int padding = 20;
     int max_tetro_size = 4;
     
-    SDL_Rect bg_rect = {
-        starting_draw_x - padding,
-        preview_start_y - padding,
-        (max_tetro_size * g_size) + (padding * 2),
-        (max_tetro_size * g_size) + (padding * 2)
+    SDL_FRect bg_rect = {
+        static_cast<float>(starting_draw_x - padding),
+        static_cast<float>(preview_start_y - padding),
+        static_cast<float>((max_tetro_size * g_size) + (padding * 2)),
+        static_cast<float>((max_tetro_size * g_size) + (padding * 2))
     };
 
     SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
     SDL_RenderFillRect(ren, &bg_rect);
 
     SDL_SetRenderDrawColor(ren, 50, 50, 50, 255);
-    SDL_RenderDrawRect(ren, &bg_rect);
+    SDL_RenderRect(ren, &bg_rect);
     
     if (next_bg) {
         *next_bg = bg_rect;
@@ -777,12 +754,13 @@ void draw_matrix(SDL_Renderer* ren, const Tetro& block, int tetro_x, int tetro_y
     for (size_t row = 0; row < next_matrix.size(); ++row) {
         for (size_t col = 0; col < next_matrix[row].size(); ++col) {
             if (next_matrix[row][col] != 0) { 
-                SDL_Rect dest = { 
-                    starting_draw_x + static_cast<int>(col) * g_size, 
-                    preview_start_y + static_cast<int>(row) * g_size, 
-                    g_size, g_size 
+                SDL_FRect dest = { 
+                    static_cast<float>(starting_draw_x + static_cast<int>(col) * g_size), 
+                    static_cast<float>(preview_start_y + static_cast<int>(row) * g_size), 
+                    static_cast<float>(g_size), 
+                    static_cast<float>(g_size) 
                 };
-                SDL_RenderCopy(ren, tex, nullptr, &dest);
+                SDL_RenderTexture(ren, tex, nullptr, &dest);
             }
         }
     }
@@ -800,8 +778,8 @@ bool collide(const Tetro& block, int off_x, int off_y, int play_grid_x, int play
     for (size_t row = 0; row < shape.size(); row++) {
         for (size_t col = 0; col < shape[row].size(); col++) {
             if (shape[row][col] != 0) {
-                int new_x = block.x + col + off_x;
-                int new_y = block.y + row + off_y;
+                int new_x = block.x + static_cast<int>(col) + off_x;
+                int new_y = block.y + static_cast<int>(row) + off_y;
 
                 if (new_x < 0 || new_x >= play_grid_x) return true;
                 if (new_y >= play_grid_y) return true; 
