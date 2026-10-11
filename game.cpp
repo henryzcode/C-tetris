@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <algorithm>
 #include <iostream>
+#include <random>
 
 namespace fs = std::filesystem;
 
@@ -45,21 +46,18 @@ Game::~Game() {
 }
 
 bool Game::init() {
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) return false;
+    if (!SDL_Init(SDL_INIT_VIDEO)) return false;
     if (!TTF_Init()) return false;
     if (!MIX_Init()) return false;
 
     mixer = MIX_CreateMixerDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, nullptr);
     if (mixer) MIX_SetMixerGain(mixer, volume);
 
-    auto playlist = load_music();
+    playlist = load_music();
     if (mixer && !playlist.empty()) {
         music_track = MIX_CreateTrack(mixer);
-        music_audio = MIX_LoadAudio(mixer, playlist[0].c_str(), false);
-        if (music_audio && music_track) {
-            MIX_SetTrackAudio(music_track, music_audio);
-            MIX_PlayTrack(music_track, 0);
-        }
+        cur_track_index = 0;
+        play_next_track();
     }
 
     const SDL_DisplayMode* dm = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
@@ -81,12 +79,11 @@ bool Game::init() {
     notice_text = std::make_unique<TextCache>(font_small, FONT_COLOR);
     next_label_text = std::make_unique<TextCache>(font_small, FONT_COLOR);
 
-    // Standard official Tetris grid dimensions (10 columns x 20 rows visible)
-    play_grid_x = 15;
-    play_grid_y = 30;
+    // Official 10x20 guideline playfield
+    play_grid_x = 10;
+    play_grid_y = 20;
 
-    // Dynamically size each cell so 20 rows occupy roughly 85% of screen height
-    const float vertical_fill_ratio = 0.85f;
+    const float vertical_fill_ratio = 0.95f;
     g_size = static_cast<int>((screen_h * vertical_fill_ratio) / play_grid_y);
 
     int grid_w = play_grid_x * g_size;
@@ -119,6 +116,31 @@ void Game::reset_game() {
 
     clear_anim.active = false;
     clear_anim.rows.clear();
+}
+
+void Game::play_next_track() {
+    if (!mixer || !music_track || playlist.empty()) return;
+
+    if (music_audio) {
+        MIX_DestroyAudio(music_audio);
+        music_audio = nullptr;
+    }
+
+    music_audio = MIX_LoadAudio(mixer, playlist[cur_track_index].c_str(), false);
+    if (music_audio) {
+        MIX_SetTrackAudio(music_track, music_audio);
+        MIX_PlayTrack(music_track, 0);
+    }
+
+    cur_track_index = (cur_track_index + 1) % static_cast<int>(playlist.size());
+}
+
+void Game::update_music() {
+    if (!mixer || !music_track || playlist.empty() || is_paused) return;
+
+    if (!MIX_TrackPlaying(music_track)) {
+        play_next_track();
+    }
 }
 
 void Game::place_piece() {
@@ -306,6 +328,8 @@ void Game::run() {
             handle_inputs(event);
         }
 
+        update_music();
+
         if (clear_anim.active) {
             if (cur_time - clear_anim.start_time >= clear_anim.duration) {
                 remove_lines(board, clear_anim.rows, play_grid_x, play_grid_y);
@@ -323,11 +347,9 @@ void Game::run() {
                 }
             }
         } else {
-
             int cur_fall_delay = (!is_paused && keys[SDL_SCANCODE_DOWN]) 
                                  ? std::max(1, fall_delay / SDF) 
                                  : fall_delay;
-
             update_movement(cur_time, keys);
             update_fall(cur_time, cur_fall_delay);
         }
@@ -467,8 +489,8 @@ void Game::draw_matrix(const Tetro& block, int tetro_x, int tetro_y, int ghost_y
     SDL_Texture* next_tex = next_it->second;
 
     int grid_w = play_grid_x * g_size;
-    int starting_draw_x = screen_w / 2 - grid_w / 2 + grid_w + 30;
-    int preview_start_y = 100;
+    int starting_draw_x = start_x + grid_w + 40;
+    int preview_start_y = start_y + 40;
     int padding = 20;
     int max_tetro_size = 4;
 

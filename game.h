@@ -7,10 +7,16 @@
 #include <string>
 #include <vector>
 #include <map>
-#include <random>
 
 #include "entities.h"
 #include "ui.h"
+
+struct ClearAnimation {
+    std::vector<int> rows;
+    Uint64 start_time = 0;
+    const Uint64 duration = 250;
+    bool active = false;
+};
 
 class Game {
 public:
@@ -20,19 +26,12 @@ public:
     bool init();
     void run();
 
-    struct ClearAnimation {
-        std::vector<int> rows;   
-        Uint64 start_time = 0;
-        const Uint64 duration = 250;
-        bool active = false;
-    };
-
-    ClearAnimation clear_anim;
-
 private:
     void handle_inputs(const SDL_Event& event);
     void update_movement(Uint64 cur_time, const bool* key_state);
     void update_fall(Uint64 cur_time, int current_fall_delay);
+    void update_music();
+    void play_next_track();
     void place_piece();
     void reset_game();
     void render();
@@ -45,9 +44,9 @@ private:
 
     int screen_w = 1920;
     int screen_h = 1080;
-    int g_size = 30;
-    int play_grid_x = 0;
-    int play_grid_y = 0;
+    int g_size = 36;
+    int play_grid_x = 10;
+    int play_grid_y = 20;
     int start_x = 0;
     int start_y = 0;
 
@@ -56,6 +55,9 @@ private:
     MIX_Mixer* mixer = nullptr;
     MIX_Track* music_track = nullptr;
     MIX_Audio* music_audio = nullptr;
+
+    std::vector<std::string> playlist;
+    int cur_track_index = 0;
 
     TTF_Font* font_large = nullptr;
     TTF_Font* font_small = nullptr;
@@ -79,6 +81,8 @@ private:
     char next_color = 'I';
     std::vector<std::vector<char>> board;
 
+    ClearAnimation clear_anim;
+
     int fall_delay = 90;
     int level = 5;
     int score = 0;
@@ -96,5 +100,4 @@ private:
     std::vector<bool> active_dir{false, false};
     std::vector<bool> das_triggered{false, false};
     std::vector<Uint64> last_move_time{0, 0};
-
 };

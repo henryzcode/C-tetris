@@ -62,36 +62,6 @@ int get_ghost_y(const Tetro& block, int play_grid_x, int play_grid_y, const std:
     return block.y + ghost_off_y;
 }
 
-int clear_line(std::vector<std::vector<char>>& board, int play_x, int play_y) {
-    int lines_cleared = 0;
-    int insert_row = play_y - 1;
-    
-    for (int row = play_y - 1; row >= 0; row--) {
-        bool row_full = true;
-        bool row_empty = true;
-        
-        for (int col = 0; col < play_x; col++) {
-            if (board[row][col] == 0) row_full = false;
-            else row_empty = false;
-        }
-        
-        if (row_full) {
-            lines_cleared++;
-        } else {
-            if (insert_row != row) board[insert_row] = board[row];
-            insert_row--;
-        }
-        if (row_empty && insert_row == row) break; 
-    }
-    
-    while (insert_row >= 0) {
-        std::fill(board[insert_row].begin(), board[insert_row].end(), 0);
-        insert_row--;
-    }
-
-    return lines_cleared;
-}
-
 std::vector<int> find_full_lines(const std::vector<std::vector<char>>& board, int play_x, int play_y) {
     std::vector<int> full_rows;
     for (int r = play_y - 1; r >= 0; --r) {
