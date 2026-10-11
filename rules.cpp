@@ -91,3 +91,39 @@ int clear_line(std::vector<std::vector<char>>& board, int play_x, int play_y) {
 
     return lines_cleared;
 }
+
+std::vector<int> find_full_lines(const std::vector<std::vector<char>>& board, int play_x, int play_y) {
+    std::vector<int> full_rows;
+    for (int r = play_y - 1; r >= 0; --r) {
+        bool full = true;
+        for (int c = 0; c < play_x; ++c) {
+            if (board[r][c] == 0) {
+                full = false;
+                break;
+            }
+        }
+        if (full) {
+            full_rows.push_back(r);
+        }
+    }
+    return full_rows;
+}
+
+void remove_lines(std::vector<std::vector<char>>& board, const std::vector<int>& rows, int play_x, int play_y) {
+    int insert_row = play_y - 1;
+
+    for (int r = play_y - 1; r >= 0; --r) {
+        bool is_cleared = (std::find(rows.begin(), rows.end(), r) != rows.end());
+        if (!is_cleared) {
+            if (insert_row != r) {
+                board[insert_row] = board[r];
+            }
+            insert_row--;
+        }
+    }
+
+    while (insert_row >= 0) {
+        std::fill(board[insert_row].begin(), board[insert_row].end(), 0);
+        insert_row--;
+    }
+}

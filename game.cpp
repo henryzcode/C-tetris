@@ -81,11 +81,13 @@ bool Game::init() {
     notice_text = std::make_unique<TextCache>(font_small, FONT_COLOR);
     next_label_text = std::make_unique<TextCache>(font_small, FONT_COLOR);
 
-    const int play_w = 600;
-    const int min_pad = 20;
-    int available_h = screen_h - (2 * min_pad);
-    play_grid_x = play_w / g_size;
-    play_grid_y = available_h / g_size;
+    // Standard official Tetris grid dimensions (10 columns x 20 rows visible)
+    play_grid_x = 15;
+    play_grid_y = 30;
+
+    // Dynamically size each cell so 20 rows occupy roughly 85% of screen height
+    const float vertical_fill_ratio = 0.85f;
+    g_size = static_cast<int>((screen_h * vertical_fill_ratio) / play_grid_y);
 
     int grid_w = play_grid_x * g_size;
     int grid_h = play_grid_y * g_size;
@@ -114,6 +116,9 @@ void Game::reset_game() {
     cur_color = rand_choice(colors);
     next_tile.setup(play_grid_x);
     next_color = rand_choice(colors);
+
+    clear_anim.active = false;
+    clear_anim.rows.clear();
 }
 
 void Game::place_piece() {
@@ -130,26 +135,32 @@ void Game::place_piece() {
         }
     }
 
-    cur_tile = next_tile;
-    cur_color = next_color;
-    next_tile.setup(play_grid_x);
-    next_color = rand_choice(colors);
+    std::vector<int> cleared_rows = find_full_lines(board, play_grid_x, play_grid_y);
+    if (!cleared_rows.empty()) {
+        clear_anim.rows = cleared_rows;
+        clear_anim.start_time = SDL_GetTicks();
+        clear_anim.active = true;
 
-    int cleared = clear_line(board, play_grid_x, play_grid_y);
-    if (cleared > 0) {
+        int lines = static_cast<int>(cleared_rows.size());
         static const int base_pts[] = {0, 100, 200, 500, 900};
-        score += base_pts[cleared] * level * (last_clear + 1);
-        lines_cleared_total += cleared;
-    }
-    last_clear = cleared;
+        score += base_pts[lines] * level * (last_clear + 1);
+        lines_cleared_total += lines;
+        last_clear = lines;
+    } else {
+        last_clear = 0;
+        cur_tile = next_tile;
+        cur_color = next_color;
+        next_tile.setup(play_grid_x);
+        next_color = rand_choice(colors);
 
-    if (collide(cur_tile, 0, 0, play_grid_x, play_grid_y, board)) {
-        reset_game();
+        if (collide(cur_tile, 0, 0, play_grid_x, play_grid_y, board)) {
+            reset_game();
+        }
     }
 }
 
 void Game::update_movement(Uint64 cur_time, const bool* key_state) {
-    if (is_paused) {
+    if (is_paused || clear_anim.active) {
         active_dir = {false, false};
         das_triggered = {false, false};
         return;
@@ -191,7 +202,7 @@ void Game::update_movement(Uint64 cur_time, const bool* key_state) {
 }
 
 void Game::update_fall(Uint64 cur_time, int current_fall_delay) {
-    if (is_paused) {
+    if (is_paused || clear_anim.active) {
         last_fall_time = cur_time;
         return;
     }
@@ -235,6 +246,8 @@ void Game::handle_inputs(const SDL_Event& event) {
         }
         return;
     }
+
+    if (clear_anim.active) return;
 
     if (event.type == SDL_EVENT_KEY_DOWN) {
         if (event.key.key == SDLK_UP && !up_hold) {
@@ -289,17 +302,36 @@ void Game::run() {
             norm_vol = volume;
         }
 
-        int cur_fall_delay = (!is_paused && keys[SDL_SCANCODE_DOWN]) 
-                             ? std::max(1, fall_delay / SDF) 
-                             : fall_delay;
-
-        update_movement(cur_time, keys);
-
         while (SDL_PollEvent(&event)) {
             handle_inputs(event);
         }
 
-        update_fall(cur_time, cur_fall_delay);
+        if (clear_anim.active) {
+            if (cur_time - clear_anim.start_time >= clear_anim.duration) {
+                remove_lines(board, clear_anim.rows, play_grid_x, play_grid_y);
+                clear_anim.active = false;
+                clear_anim.rows.clear();
+                last_fall_time = cur_time;
+
+                cur_tile = next_tile;
+                cur_color = next_color;
+                next_tile.setup(play_grid_x);
+                next_color = rand_choice(colors);
+
+                if (collide(cur_tile, 0, 0, play_grid_x, play_grid_y, board)) {
+                    reset_game();
+                }
+            }
+        } else {
+
+            int cur_fall_delay = (!is_paused && keys[SDL_SCANCODE_DOWN]) 
+                                 ? std::max(1, fall_delay / SDF) 
+                                 : fall_delay;
+
+            update_movement(cur_time, keys);
+            update_fall(cur_time, cur_fall_delay);
+        }
+
         render();
         SDL_Delay(1000 / FPS);
     }
@@ -311,27 +343,52 @@ void Game::render() {
 
     draw_grid();
 
+    float shrink_scale = 1.0f;
+    if (clear_anim.active) {
+        Uint64 elapsed = SDL_GetTicks() - clear_anim.start_time;
+        shrink_scale = std::clamp(1.0f - (static_cast<float>(elapsed) / clear_anim.duration), 0.0f, 1.0f);
+    }
+
     for (int r = 0; r < play_grid_y; ++r) {
+        bool is_clearing = clear_anim.active && 
+            (std::find(clear_anim.rows.begin(), clear_anim.rows.end(), r) != clear_anim.rows.end());
+
         for (int c = 0; c < play_grid_x; ++c) {
             if (board[r][c] != 0) {
                 auto it = textures.find(board[r][c]);
                 if (it != textures.end() && it->second) {
-                    SDL_FRect dest = { 
-                        static_cast<float>(start_x + c * g_size), 
-                        static_cast<float>(start_y + r * g_size), 
-                        static_cast<float>(g_size), 
-                        static_cast<float>(g_size) 
-                    };
+                    SDL_FRect dest;
+
+                    if (is_clearing) {
+                        float cell_size = static_cast<float>(g_size) * shrink_scale;
+                        float offset = (static_cast<float>(g_size) - cell_size) / 2.0f;
+                        dest = { 
+                            static_cast<float>(start_x + c * g_size) + offset, 
+                            static_cast<float>(start_y + r * g_size) + offset, 
+                            cell_size, 
+                            cell_size 
+                        };
+                    } else {
+                        dest = { 
+                            static_cast<float>(start_x + c * g_size), 
+                            static_cast<float>(start_y + r * g_size), 
+                            static_cast<float>(g_size), 
+                            static_cast<float>(g_size) 
+                        };
+                    }
+
                     SDL_RenderTexture(renderer, it->second, nullptr, &dest);
                 }
             }
         }
     }
 
-    int ghost_y = get_ghost_y(cur_tile, play_grid_x, play_grid_y, board);
-    draw_matrix(cur_tile, cur_tile.x, cur_tile.y, ghost_y, cur_color, next_tile, next_color);
+    if (!clear_anim.active) {
+        int ghost_y = get_ghost_y(cur_tile, play_grid_x, play_grid_y, board);
+        draw_matrix(cur_tile, cur_tile.x, cur_tile.y, ghost_y, cur_color, next_tile, next_color);
+    }
 
-    title_text->render(renderer, "Tetris 2.0", 20.0f, 10.0f);
+    title_text->render(renderer, "Tetris 3.2beta", 20.0f, 10.0f);
     score_text->render(renderer, "Score: " + std::to_string(score), 20.0f, 70.0f);
     lines_text->render(renderer, "Line Clears: " + std::to_string(lines_cleared_total), 20.0f, 130.0f);
     notice_text->render(renderer, "Tetris C++ with SDL - Henry", static_cast<float>(screen_w - 300), static_cast<float>(screen_h - 50));
@@ -434,7 +491,8 @@ void Game::draw_matrix(const Tetro& block, int tetro_x, int tetro_y, int ghost_y
                 SDL_FRect dest = { 
                     static_cast<float>(starting_draw_x + static_cast<int>(c) * g_size), 
                     static_cast<float>(preview_start_y + static_cast<int>(r) * g_size), 
-                    static_cast<float>(g_size), static_cast<float>(g_size) 
+                    static_cast<float>(g_size), 
+                    static_cast<float>(g_size) 
                 };
                 SDL_RenderTexture(renderer, next_tex, nullptr, &dest);
             }

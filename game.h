@@ -20,6 +20,15 @@ public:
     bool init();
     void run();
 
+    struct ClearAnimation {
+        std::vector<int> rows;   
+        Uint64 start_time = 0;
+        const Uint64 duration = 250;
+        bool active = false;
+    };
+
+    ClearAnimation clear_anim;
+
 private:
     void handle_inputs(const SDL_Event& event);
     void update_movement(Uint64 cur_time, const bool* key_state);
@@ -36,7 +45,7 @@ private:
 
     int screen_w = 1920;
     int screen_h = 1080;
-    const int g_size = 30;
+    int g_size = 30;
     int play_grid_x = 0;
     int play_grid_y = 0;
     int start_x = 0;
@@ -87,4 +96,5 @@ private:
     std::vector<bool> active_dir{false, false};
     std::vector<bool> das_triggered{false, false};
     std::vector<Uint64> last_move_time{0, 0};
+
 };
