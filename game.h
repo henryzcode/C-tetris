@@ -83,7 +83,7 @@ private:
 
     ClearAnimation clear_anim;
 
-    int fall_delay = 90;
+    int fall_delay = 500;
     int level = 5;
     int score = 0;
     int lines_cleared_total = 0;
