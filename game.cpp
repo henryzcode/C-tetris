@@ -410,7 +410,7 @@ void Game::render() {
         draw_matrix(cur_tile, cur_tile.x, cur_tile.y, ghost_y, cur_color, next_tile, next_color);
     }
 
-    title_text->render(renderer, "Tetris 3.2beta", 20.0f, 10.0f);
+    title_text->render(renderer, "Tetris 3.3", 20.0f, 10.0f);
     score_text->render(renderer, "Score: " + std::to_string(score), 20.0f, 70.0f);
     lines_text->render(renderer, "Line Clears: " + std::to_string(lines_cleared_total), 20.0f, 130.0f);
     notice_text->render(renderer, "Tetris C++ with SDL - Henry", static_cast<float>(screen_w - 300), static_cast<float>(screen_h - 50));
