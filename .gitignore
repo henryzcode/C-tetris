@@ -2,7 +2,6 @@
 .tmp.driverdownload/
 .tmp.driveupload/
 build/
-CMakeLists.txt
 .tmp.drivedownload/
 .vscode/
 .vs/

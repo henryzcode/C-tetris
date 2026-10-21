@@ -1,5 +1,5 @@
-#include "game.h"
-#include "rules.h"
+#include "headers/game.h"
+#include "headers/rules.h"
 #include <SDL3_image/SDL_image.h>
 #include <filesystem>
 #include <algorithm>
