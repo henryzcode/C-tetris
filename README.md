@@ -2,6 +2,8 @@
 
 A classic Tetris clone written in C++ using the SDL2 library, created by Henry.
 
+<img alt="screenshot of the game" src="assets/image.png" />
+
 ## Features
 
 * **Classic Gameplay**: Features the standard 7 Tetrominoes (I, J, L, O, S, T, Z) with randomized colors.
