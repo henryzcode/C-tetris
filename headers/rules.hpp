@@ -4,7 +4,7 @@
 #include <vector>
 #include <map>
 #include <utility>
-#include "entities.h"
+#include "entities.hpp"
 
 using KickTable = std::map<std::pair<int, int>, std::vector<SDL_Point>>;
 using KickList = std::map<char, KickTable>;

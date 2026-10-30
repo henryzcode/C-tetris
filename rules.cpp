@@ -1,4 +1,4 @@
-#include "headers/rules.h"
+#include "headers/rules.hpp"
 #include <random>
 #include <stdexcept>
 #include <algorithm>

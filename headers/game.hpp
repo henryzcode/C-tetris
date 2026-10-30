@@ -8,8 +8,8 @@
 #include <vector>
 #include <map>
 
-#include "entities.h"
-#include "ui.h"
+#include "entities.hpp"
+#include "ui.hpp"
 
 struct ClearAnimation {
     std::vector<int> rows;
@@ -42,11 +42,11 @@ private:
     std::vector<std::string> load_music();
     std::map<char, SDL_Texture*> load_textures();
 
-    int screen_w = 1920;
-    int screen_h = 1080;
-    int g_size = 36;
-    int play_grid_x = 10;
-    int play_grid_y = 20;
+    int screen_w;
+    int screen_h;
+    int g_size;
+    int play_grid_x;
+    int play_grid_y;
     int start_x = 0;
     int start_y = 0;
 

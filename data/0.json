@@ -1,0 +1,12 @@
+{
+    "grid": {
+      "rows": 20,
+      "cols": 10
+    },
+    "gameplay": {
+      "gravity_speed_ms": 800,
+      "lock_delay_ms": 500,
+      "das": 133,
+      "arr": 10
+    }
+  }
