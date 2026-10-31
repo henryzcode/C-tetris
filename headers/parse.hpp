@@ -12,12 +12,10 @@ namespace parser{
     {
         int rows = 20;
         int cols = 10;
-        int gravity_speed_ms = 800;
-        int lock_delay_ms = 500;
+        int gravity_speed_ms = 500;
         int das = 133;
         int arr = 10;
-        int block_size = 32;
-        bool show_ghost_piece = true;
+        int sdf = 20;
     };
 
     Config loadConfig(const std::string &filepath);

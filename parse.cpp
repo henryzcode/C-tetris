@@ -11,11 +11,11 @@ namespace parser
     {
         int rows = 20;
         int cols = 10;
-        int gravity_speed_ms = 800;
+        int gravity_speed_ms = 500;
         int das = 133;
         int arr = 10;
+        int sdf = 20;
     };
-
 
     Config loadConfig(const std::string &filepath)
     {
@@ -34,6 +34,7 @@ namespace parser
             config.rows = j["grid"].value("rows", 20);
             config.cols = j["grid"].value("cols", 10);
             config.gravity_speed_ms = j["gameplay"].value("gravity_speed_ms", 800);
+            config.sdf = j["gameplay"].value("sdf", 10);
             config.das = j["gameplay"].value("das", 133);
             config.arr = j["gameplay"].value("arr", 10);
 

@@ -9,8 +9,7 @@
 
 namespace fs = std::filesystem;
 
-namespace
-{
+
 const int FPS = 60;
 int DAS = 120;
 int ARR = 20;
@@ -18,7 +17,6 @@ int SDF = 20;
 const float GHOST_ALPHA = 70.0f / 255.0f;
 const SDL_Color FONT_COLOR = {255, 255, 255, 255};
 const std::string BASE_MUSIC_DIR = "assets/music/";
-} // namespace
 
 Game::Game() = default;
 
@@ -106,6 +104,7 @@ bool Game::init()
 
     DAS = game_data.das ? game_data.das : 120;
     ARR = game_data.arr ? game_data.arr : 20;
+    SDF = game_data.sdf ? game_data.sdf : 10;
 
     fall_delay = game_data.gravity_speed_ms ? game_data.gravity_speed_ms : 500;
 
