@@ -1,87 +1,97 @@
 ﻿# C-Tetris
 
-A classic Tetris clone written in C++ using the SDL2 library, created by Henry.
+A classic Tetris clone written in modern C++20 using the **SDL3** library, created by Henry.
 
-<img alt="screenshot of the game" src="assets/image.png" />
+<img alt="screenshot of the game" src="assets/image.png" width="480" />
 
 ## Features
 
-* **Classic Gameplay**: Features the standard 7 Tetrominoes (I, J, L, O, S, T, Z) with randomized colors.
-
-
-* **Modern Mechanics**: Includes a ghost piece for accurate dropping, a next piece preview, and wall-kick (SRS) rotation handling.
-
-
-* **Audio System**: Background music playlist with automatic shuffling and cross-fading, plus sound effects for UI interactions.
-
-
-* **Scoring System**: Points are awarded for line clears, scaling with multiple lines cleared at once and the current level.
-
-
-* **Interactive UI**: A fully functional pause menu with resume and quit options.
-
-
-
----
+- **Classic & Custom Gameplay**: Features the standard 7 Tetrominoes (I, J, L, O, S, T, Z) with dynamic coloring and data-driven rule configuration via JSON (`data/`).
+- **Modern Mechanics**: Super Rotation System (SRS) with full wall-kicks, ghost piece landing projection, hard drop, and a next-piece preview queue.
+- **Audio System**: Background audio playlist management with track shuffling, volume adjustment, and dedicated UI sound effects.
+- **NES/Classic Scoring**: Multi-line clear scoring that scales dynamically with speed and level progression.
+- **Interactive UI & Menus**: Clean pause overlay, in-game interactive menus, sound triggers, and game-over state handling.
 
 ## Controls
 
-* **Left / Right Arrows**: Move the active piece.
-
-
-* **Up Arrow**: Rotate the piece.
-
-
-* **Down Arrow**: Soft drop (speeds up falling).
-
-
-* **Spacebar**: Hard drop (instantly drops the piece to the bottom).
-
-
-* **Escape**: Pause the game.
-
-
-* **F1 / F2**: Decrease or increase music volume.
-
-
-* **Delete**: Exit the game.
-
-
+| Key | Action |
+| :--- | :--- |
+| **Left / Right** | Move tetromino laterally |
+| **Up** | Rotate clockwise (SRS) |
+| **Down** | Soft drop |
+| **Spacebar** | Hard drop (instant drop & lock) |
+| **Escape** | Pause / Resume |
+| **F1 / F2** | Master volume down / up |
+| **Delete** | Quick exit to desktop |
 
 ---
 
-## Dependencies
+## Prerequisites & Dependencies
 
-To compile and run this project, you will need a compiler that supports C++20 (for `std::ranges::shuffle`) and the following libraries installed on your system:
+To build and run this project, make sure you have:
+- A C++20 compatible compiler (e.g., GCC 13+, Clang 16+, or MSVC 2022)
+- [CMake](https://cmake.org/) (>= 3.20)
+- [Ninja](https://ninja-build.org/) or GNU Make
+- **SDL3** libraries:
+  - `SDL3`
+  - `SDL3_image`
+  - `SDL3_mixer`
+  - `SDL3_ttf`
+- **nlohmann_json** (for parsing board states/configurations)
 
-* SDL3
+### Installing Dependencies (Ubuntu / Debian)
+---
+```bash
+sudo apt update
+sudo apt install -y build-essential cmake ninja-build git \
+    libsdl3-dev libsdl3-image-dev libsdl3-mixer-dev libsdl3-ttf-dev \
+    nlohmann-json3-dev
+```
 
+### Build using Cmake
+---
 
-* SDL3_image
+```bash
+# 1. Clone the repository
+git clone [https://github.com/henryzcode/C-tetris.git](https://github.com/henryzcode/C-tetris.git)
+cd C-tetris
 
+# 2. Configure build environment
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
-* SDL3_mixer
+# 3. Build the binary
+cmake --build build -j$(nproc)
+```
+### Project structure
+---
+```
+C-tetris/
+├── assets/             # Game assets (sprites, textures, fonts, audio)
+│   ├── music/          # Background BGM tracks
+│   ├── sound/          # UI and gameplay SFX
+│   ├── tiles/          # Tetromino block textures
+│   └── pixel.ttf       # Font file
+├── data/               # Game data, presets, and configs (.json)
+├── headers/            # C++ header files (.hpp)
+│   ├── entities.hpp
+│   ├── game.hpp
+│   ├── parse.hpp
+│   ├── rules.hpp
+│   └── ui.hpp
+├── CMakeLists.txt      # CMake build definitions
+└── *.cpp               # Core translation units (main, game, rules, parse, etc.)
+```
 
+### License
+---
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
 
-* SDL3_ttf
-
-
-
-## Assets Structure
-
-Ensure your root directory contains the following asset folders for the game to load correctly:
-
-* `/assets/tiles/` (contains individual block colors like `blue.png`, `red.png`, etc.)
-
-
-* `/assets/music/` (contains background tracks)
-
-
-* `/assets/sound/` (contains UI sound effects like `clicked.wav`)
-
-
-* `/assets/pixel.ttf` (font file for rendering text)
-
-
-* UI images (e.g., `button.png`, `menu.png`, `quit.png` and their hovered states)
-
+### Acknowledgements
+---
+* **SDL3** for v3.x or newer version of Ctetris
+* **SDL2** for older version of Ctetris
+* **SDL-image**
+* **SDL-ttf**
+* **SDL-mixer**
+* nlohmann/**json**
+* **Cmake**
